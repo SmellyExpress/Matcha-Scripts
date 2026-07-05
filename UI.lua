@@ -295,19 +295,27 @@ end
 if typeof(UI) == "table" and UI.AddTab then
     pcall(function()
         UI.AddTab("HAVOC", function(tab)
+            -- Left Column: Tabbed Section with 2 Pages
             local sec = tab:Section("ESP Settings", "Left", {"AI ESP", "World ESP"}, 260)
-            sec:Toggle("havoc_esp_enabled",  "Enabled",    DEF.havoc_esp_enabled)
-            sec:Toggle("havoc_esp_box",      "Box",        DEF.havoc_esp_box)
-            sec:Toggle("havoc_esp_name",     "Name",       DEF.havoc_esp_name)
-            sec:Toggle("havoc_esp_distance", "Distance",   DEF.havoc_esp_distance)
-            sec:Toggle("havoc_esp_tracer",   "Tracers",    DEF.havoc_esp_tracer)
-            sec:SliderInt("havoc_esp_dist_max",    "Max Distance",      50, 3000, DEF.havoc_esp_dist_max)
-            sec:SliderInt("havoc_esp_update_rate", "Update Rate (fps)",  5,   60, DEF.havoc_esp_update_rate)
-            sec:ColorPicker("havoc_esp_boxcol", "Box Color", 255 / 255, 80 / 255, 80 / 255)
+            
+            if sec.page == 0 then
+                -- Page 1: AI ESP Controls
+                sec:Toggle("havoc_esp_enabled",  "Enabled",    DEF.havoc_esp_enabled)
+                sec:Toggle("havoc_esp_box",      "Box",        DEF.havoc_esp_box)
+                sec:Toggle("havoc_esp_name",     "Name",       DEF.havoc_esp_name)
+                sec:Toggle("havoc_esp_distance", "Distance",   DEF.havoc_esp_distance)
+                sec:Toggle("havoc_esp_tracer",   "Tracers",    DEF.havoc_esp_tracer)
+                sec:SliderInt("havoc_esp_dist_max",    "Max Distance",      50, 3000, DEF.havoc_esp_dist_max)
+                sec:SliderInt("havoc_esp_update_rate", "Update Rate (fps)",  5,   60, DEF.havoc_esp_update_rate)
+                sec:ColorPicker("havoc_esp_boxcol", "Box Color", 255 / 255, 80 / 255, 80 / 255)
 
-            sec:Toggle("havoc_esp_items", "Show Items", DEF.havoc_esp_items or true)
-            sec:Toggle("havoc_esp_containers", "Show Containers", DEF.havoc_esp_containers or true)
+            elseif sec.page == 1 then
+                -- Page 2: World ESP Controls
+                sec:Toggle("havoc_esp_items", "Show Items", DEF.havoc_esp_items or true)
+                sec:Toggle("havoc_esp_containers", "Show Containers", DEF.havoc_esp_containers or true)
+            end
 
+            -- Right Column: Static Visuals/Environment Adjustments
             local vis = tab:Section("Visuals", "Right", nil, 260)
             vis:Toggle("havoc_nofog", "No Fog", DEF.havoc_nofog)
         end)
