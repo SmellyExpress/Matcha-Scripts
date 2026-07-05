@@ -34,8 +34,10 @@ end
 EntityCache = { NPCs = {} }
 local BOX_COL = Color3.fromRGB(255, 80, 80)
 local TEXT_SIZE = 13
-local V3_HEAD = Vector3.new(0, 2.6, 0)
-local V3_FOOT = Vector3.new(0, 3.2, 0)
+
+-- Adjusted offsets to properly encase standard NPC humanoids
+local V3_HEAD = Vector3.new(0, 2.3, 0)
+local V3_FOOT = Vector3.new(0, 3.0, 0)
 
 -- 3. UI DEFINITION
 if typeof(UI) == "table" and UI.AddTab then
@@ -218,13 +220,11 @@ renderConnection = RunService.RenderStepped:Connect(function()
 
         local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
         if npcRoot then
-            -- FIXED: Dynamically capture bounding coordinates instead of using static V3 vectors
-            local cframe, size = npc:GetBoundingBox()
-            local topWorld = (cframe * CFrame.new(0, size.Y / 2, 0)).Position
-            local botWorld = (cframe * CFrame.new(0, -size.Y / 2, 0)).Position
+            local npcPos = npcRoot.Position
             
-            local topPos, topOn = worldToScreen(topWorld)
-            local botPos, botOn = worldToScreen(botWorld)
+            -- Vector projection using updated V3 offsets
+            local topPos, topOn = worldToScreen(npcPos + V3_HEAD)
+            local botPos, botOn = worldToScreen(npcPos - V3_FOOT)
 
             if topOn and botOn then
                 currentSlotIndex = currentSlotIndex + 1
@@ -233,7 +233,7 @@ renderConnection = RunService.RenderStepped:Connect(function()
                 -- Box sizing derivations from screen space calculations
                 local height = math.abs(botPos.Y - topPos.Y)
                 if height < 1 then height = 1 end
-                local width = height * 0.6 -- Slightly scaled for bounding box dimensions
+                local width = height * 0.55 -- Scaled layout constraint
                 local boxX = topPos.X - width * 0.5
                 local boxY = topPos.Y
 
@@ -247,7 +247,7 @@ renderConnection = RunService.RenderStepped:Connect(function()
 
                 -- Range metric calculation
                 if myRootPart then
-                    local realDistance = math.floor((myRootPart.Position - npcRoot.Position).Magnitude)
+                    local realDistance = math.floor((myRootPart.Position - npcPos).Magnitude)
                     slot.distance.Text = tostring(realDistance) .. "m"
                 else
                     slot.distance.Text = "NPC"
