@@ -5,7 +5,7 @@ local HttpService = game:GetService("HttpService")
 local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local DEBUG = false
+local DEBUG = true   -- set to false to silence console logs
 
 local DEF = {
     havoc_esp_enabled     = true,
@@ -18,7 +18,6 @@ local DEF = {
     havoc_nofog           = false,
 }
 
--- Aimbot defaults
 local AIM_DEF = {
     enabled   = false,
     key       = 0x02,          -- RMB
@@ -51,6 +50,7 @@ local function uiColor(key, fallback)
     return fallback
 end
 
+-- ===== FOG OFFSETS (unchanged) =====
 local _off = {}
 pcall(function()
     local res = game:HttpGet("https://offsets.imtheo.lol/Offsets.json")
@@ -123,6 +123,7 @@ local function restoreFog()
     end)
 end
 
+-- ===== CLEANUP =====
 if _G.HAVOC_ESP_CLEANUP then pcall(_G.HAVOC_ESP_CLEANUP) end
 
 local running  = true
@@ -147,6 +148,7 @@ _G.HAVOC_ESP_CLEANUP = function()
     pcall(restoreFog)
 end
 
+-- ===== DRAWING HELPERS =====
 local FONT      = Drawing.Fonts.Monospace or Drawing.Fonts.System
 local MAX_SLOTS = 40
 
@@ -202,6 +204,7 @@ local function drawBox(s, x, y, w, h, col)
     end
 end
 
+-- ===== WORLD ↔ SCREEN =====
 local V3_HEAD = Vector3.new(0, 2.6, 0)
 local V3_FOOT = Vector3.new(0, 3.2, 0)
 
@@ -210,6 +213,7 @@ local function worldToScreen(pos)
     return WorldToScreenFn(pos)
 end
 
+-- ===== CAMERA EYE POSITION =====
 local eyePart, eyeStamp = nil, 0
 local EYE_TTL = 1.0
 
@@ -249,7 +253,7 @@ local function getEyePos()
     return nil
 end
 
--- Re-purposed recursive collection function that enforces active player blacklisting
+-- ===== NPC COLLECTION =====
 local function collectFrom(inst, myChar, playerNames, out, depth)
     if depth > 8 then return end
     local ok, kids = pcall(function() return inst:GetChildren() end)
@@ -302,7 +306,7 @@ local function getCharacters()
     return out
 end
 
--- ========== AIMBOT FUNCTIONS ==========
+-- ===== AIMBOT FUNCTIONS =====
 
 local function getBestTarget()
     local cam = Camera
@@ -315,7 +319,10 @@ local function getBestTarget()
     local hitboxMode = uiGet("aim_hitbox", 0) -- 0=Head, 1=Torso, 2=Nearest
 
     local all = getCharacters()
-    if #all == 0 then return nil end
+    if #all == 0 then
+        if DEBUG then print("[Aimbot] No characters found.") end
+        return nil
+    end
 
     local best = nil
     local bestAngle = 1e9
@@ -334,7 +341,6 @@ local function getBestTarget()
 
                 local dirToTarget = (aimPos - camPos).Unit
                 local dot = lookDir:Dot(dirToTarget)
-                -- clamp dot to [-1,1]
                 local clamped = math.max(-1, math.min(1, dot))
                 local angle = math.deg(math.acos(clamped))
 
@@ -354,10 +360,14 @@ local function getBestTarget()
             end
         end
     end
+
+    if DEBUG and best then
+        print(string.format("[Aimbot] Target: %s, dist: %.1f, angle: %.1f°", best.model.Name, best.distance, best.angle))
+    end
     return best
 end
 
--- Smooth mouse aiming
+-- Smooth mouse aiming using mousemoveabs
 local currentMousePos = Vector2.new()
 pcall(function()
     local vp = Camera.ViewportSize
@@ -367,37 +377,28 @@ end)
 local function aimAtTarget(target, smoothFactor)
     if not target then return end
     local screenPos, onScreen = worldToScreen(target.position)
-    if not onScreen then return end
+    if not onScreen then
+        if DEBUG then print("[Aimbot] Target off-screen") end
+        return
+    end
 
     local vp = Camera.ViewportSize
+    -- Clamp to viewport
     local targetScreen = Vector2.new(
         math.max(0, math.min(screenPos.X, vp.X)),
         math.max(0, math.min(screenPos.Y, vp.Y))
     )
 
+    -- Interpolate from current mouse position
     local newPos = currentMousePos:Lerp(targetScreen, smoothFactor)
 
-    -- ============================================================
-    -- REPLACE THE FOLLOWING LINE WITH THE CORRECT MOUSE API CALL
-    -- ============================================================
-    -- If you have an absolute mouse function (SetCursorPos):
-    --   SetCursorPos(newPos.X, newPos.Y)
-    -- If you have relative movement (mouse_move(dx, dy)):
-    --   local dx = newPos.X - currentMousePos.X
-    --   local dy = newPos.Y - currentMousePos.Y
-    --   mouse_move(dx, dy)
-    -- If Matcha provides something else, consult its documentation.
-    -- ============================================================
-    pcall(function()
-        -- Placeholder: does nothing – replace this with the actual call.
-        -- Example: SetCursorPos(newPos.X, newPos.Y)
-    end)
+    -- Use Matcha's absolute mouse move
+    mousemoveabs(math.floor(newPos.X), math.floor(newPos.Y))
 
     currentMousePos = newPos
 end
 
--- ========== UI CREATION ==========
-
+-- ===== UI CREATION =====
 local aimKey = nil
 
 if typeof(UI) == "table" and UI.AddTab then
@@ -412,7 +413,6 @@ if typeof(UI) == "table" and UI.AddTab then
         sec:SliderInt("havoc_esp_update_rate", "Update Rate (fps)",  5,   60, DEF.havoc_esp_update_rate)
         sec:ColorPicker("havoc_esp_boxcol", "Box Color", 255 / 255, 80 / 255, 80 / 255)
 
-        -- Aimbot Section
         local aim = tab:Section("Aimbot", "Left", nil, 260)
         aim:Toggle("aim_enabled", "Enabled", AIM_DEF.enabled)
         aimKey = aim:Keybind("aim_key", AIM_DEF.key, AIM_DEF.key_type)
@@ -435,8 +435,7 @@ if typeof(UI) == "table" and UI.AddTab then
     end)
 end
 
--- ========== ESP ITEMS BUILDING ==========
-
+-- ===== ESP ITEMS BUILDING =====
 local espItems = {}
 local snap = { box = true, name = true, dist = true, tracer = false, boxCol = BOX_COL_DEF }
 local lastBuild = 0
@@ -469,8 +468,7 @@ local function rebuildItems()
     espItems = out
 end
 
--- ========== RENDER LOOP ==========
-
+-- ===== RENDER LOOP =====
 local lastDrawn = 0
 local dbgClock  = os.clock()
 
@@ -547,7 +545,6 @@ renderConn = RunService.RenderStepped:Connect(function()
         for i = slot + 1, lastDrawn do hideSlot(slots[i]) end
         lastDrawn = slot
     else
-        -- ESP disabled: hide all
         for i = 1, lastDrawn do hideSlot(slots[i]) end
         lastDrawn = 0
     end
