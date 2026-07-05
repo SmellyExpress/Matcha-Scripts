@@ -5,7 +5,7 @@ local HttpService = game:GetService("HttpService")
 local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local DEBUG = true   -- Keep true
+local DEBUG = true
 
 local DEF = {
     havoc_esp_enabled     = true,
@@ -304,7 +304,7 @@ local function getCharacters()
     return out
 end
 
--- ===== AIMBOT FUNCTIONS =====
+-- ===== AIMBOT FUNCTIONS (no goto) =====
 local function getBestTarget()
     local cam = Camera
     if not cam then return nil end
@@ -332,37 +332,37 @@ local function getBestTarget()
 
     for _, entry in ipairs(all) do
         local rootPart = entry.hrp
-        if not rootPart then goto continue end
-        local ok, rootPos = pcall(function() return rootPart.Position end)
-        if not ok or not rootPos then goto continue end
+        if rootPart then
+            local ok, rootPos = pcall(function() return rootPart.Position end)
+            if ok and rootPos then
+                local dist = (camPos - rootPos).Magnitude
+                if dist <= maxDist then
+                    local aimPos = rootPos
+                    if hitboxMode == 0 then        -- Head
+                        aimPos = rootPos + Vector3.new(0, 2.6, 0)
+                    end
 
-        local dist = (camPos - rootPos).Magnitude
-        if dist <= maxDist then
-            local aimPos = rootPos
-            if hitboxMode == 0 then        -- Head
-                aimPos = rootPos + Vector3.new(0, 2.6, 0)
-            end
+                    local dirToTarget = (aimPos - camPos).Unit
+                    local dot = lookDir:Dot(dirToTarget)
+                    local clamped = math.max(-1, math.min(1, dot))
+                    local angle = math.deg(math.acos(clamped))
 
-            local dirToTarget = (aimPos - camPos).Unit
-            local dot = lookDir:Dot(dirToTarget)
-            local clamped = math.max(-1, math.min(1, dot))
-            local angle = math.deg(math.acos(clamped))
-
-            if angle <= fovDeg then
-                if angle < bestAngle then
-                    bestAngle = angle
-                    best = {
-                        position = aimPos,
-                        rootPos = rootPos,
-                        part = rootPart,
-                        model = entry.model,
-                        distance = dist,
-                        angle = angle
-                    }
+                    if angle <= fovDeg then
+                        if angle < bestAngle then
+                            bestAngle = angle
+                            best = {
+                                position = aimPos,
+                                rootPos = rootPos,
+                                part = rootPart,
+                                model = entry.model,
+                                distance = dist,
+                                angle = angle
+                            }
+                        end
+                    end
                 end
             end
         end
-        ::continue::
     end
 
     if DEBUG then
@@ -551,8 +551,7 @@ renderConn = RunService.RenderStepped:Connect(function()
 
     -- ---- AIMBOT ----
     local aimEnabled = uiGet("aim_enabled", false)
-    -- Use RMB (mouse2) and F key as fallback
-    local keyActive = ismouse2pressed() or iskeypressed(0x46)  -- 0x46 = F
+    local keyActive = ismouse2pressed() or iskeypressed(0x46)  -- RMB or F
 
     if DEBUG and (os.clock() - lastAimPrint) >= 2 then
         lastAimPrint = os.clock()
