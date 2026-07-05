@@ -7,13 +7,13 @@ end
 
 local isScriptRunnning = true
 
-_.GHavocCleanup = function()
+_G.HavocCleanup = function()
     isScriptRunning = false
     print("Cleaned up previous session.")
 end
 
 if typeof(UI) == "table" and UI.AddTab then
-    UI.addTab("Havoc", fuction(tab)
+    UI.AddTab("Havoc", function(tab)
         local VisualSec = tab:Section("Visuals", "Left")
         VisualSec:Toggle("havoc_esp", "Esp", false)
     end)
