@@ -272,19 +272,21 @@ local function collectFrom(inst, myChar, playerNames, out, depth)
     end
 end
 
+-- Fixed collection to look exactly in workspace.buildings.loots
 local function collectItemsAndContainers(out)
-    local buildings = workspace:FindFirstChild("buildings")
-    local lootsFolder = buildings and buildings:FindFirstChild("loots")
+    local buildingsFolder = workspace:FindFirstChild("buildings")
+    local lootsFolder = buildingsFolder and buildingsFolder:FindFirstChild("loots")
     if not lootsFolder then return end
 
     local ok, kids = pcall(function() return lootsFolder:GetChildren() end)
     if not ok or not kids then return end
 
     for _, child in ipairs(kids) do
-        local isItem = child:FindFirstChild("ProximityPrompt") or child.Name:lower():find("loot") or child.Name:lower():find("item")
-        local isContainer = child.Name:lower():find("container") or child.Name:lower():find("chest") or child.Name:lower():find("safe")
-        
-        if (isItem or isContainer) and child:IsA("BasePart") then
+        local nameLower = child.Name:lower()
+        local isContainer = nameLower:find("container") or nameLower:find("chest") or nameLower:find("safe") or nameLower:find("crate") or nameLower:find("case")
+        local isItem = not isContainer -- If it's in the loots folder and not explicitly tagged as a container, treat it as a world item
+
+        if child:IsA("BasePart") then
             out[#out + 1] = {
                 part = child,
                 name = child.Name,
@@ -292,12 +294,12 @@ local function collectItemsAndContainers(out)
                 isContainer = isContainer
             }
         elseif child:IsA("Model") then
-            local mainPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+            local mainPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart") or child:FindFirstChildWhichIsA("MeshPart")
             if mainPart then
                 out[#out + 1] = {
                     part = mainPart,
                     name = child.Name,
-                    isItem = isItem or (not isContainer),
+                    isItem = isItem,
                     isContainer = isContainer
                 }
             end
@@ -370,7 +372,7 @@ local function rebuildItems()
 
     local out = {}
     
-    -- AI Entities Processing
+    -- 1. AI Entities
     for _, e in ipairs(getCharacters()) do
         local ok, rootPos = pcall(function() return e.hrp.Position end)
         if ok and rootPos then
@@ -388,7 +390,7 @@ local function rebuildItems()
         end
     end
     
-    -- World Items Processing from target destination
+    -- 2. World Items from workspace.buildings.loots
     if (showItems or showContainers) and #out < MAX_SLOTS then
         local worldLoot = {}
         collectItemsAndContainers(worldLoot)
@@ -453,7 +455,7 @@ renderConn = RunService.RenderStepped:Connect(function()
         local ok, rootPos = pcall(function() return it.part.Position end)
         if ok and rootPos then
             if it.isWorldLoot then
-                -- Render logic for World Loot (Text Only, No Boxes)
+                -- World Loot ESP: Just Name and Distance (No Boxes, No Tracers)
                 local screenPos, onScreen = worldToScreen(rootPos)
                 if onScreen then
                     slot = slot + 1
@@ -475,7 +477,7 @@ renderConn = RunService.RenderStepped:Connect(function()
                     end
                 end
             else
-                -- Traditional Bounding Box Render logic for Character Models
+                -- AI Character Models: Full 2D Box Visuals
                 local topPos, topOn = worldToScreen(rootPos + V3_HEAD)
                 local botPos, botOn = worldToScreen(rootPos - V3_FOOT)
                 if topOn and botOn then
