@@ -5,7 +5,7 @@ local HttpService = game:GetService("HttpService")
 local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local DEBUG = true   -- set to false to silence console logs
+local DEBUG = true   -- Set to true to see debug output
 
 local DEF = {
     havoc_esp_enabled     = true,
@@ -50,7 +50,7 @@ local function uiColor(key, fallback)
     return fallback
 end
 
--- ===== FOG OFFSETS (unchanged) =====
+-- ===== FOG OFFSETS =====
 local _off = {}
 pcall(function()
     local res = game:HttpGet("https://offsets.imtheo.lol/Offsets.json")
@@ -363,6 +363,8 @@ local function getBestTarget()
 
     if DEBUG and best then
         print(string.format("[Aimbot] Target: %s, dist: %.1f, angle: %.1f°", best.model.Name, best.distance, best.angle))
+    elseif DEBUG and not best then
+        print("[Aimbot] No target in FOV/distance.")
     end
     return best
 end
@@ -375,7 +377,15 @@ pcall(function()
 end)
 
 local function aimAtTarget(target, smoothFactor)
-    if not target then return end
+    if not target then
+        if DEBUG then print("[Aimbot] aimAtTarget called with nil target") end
+        return
+    end
+    if not target.position then
+        if DEBUG then print("[Aimbot] target.position is nil") end
+        return
+    end
+
     local screenPos, onScreen = worldToScreen(target.position)
     if not onScreen then
         if DEBUG then print("[Aimbot] Target off-screen") end
@@ -383,13 +393,11 @@ local function aimAtTarget(target, smoothFactor)
     end
 
     local vp = Camera.ViewportSize
-    -- Clamp to viewport
     local targetScreen = Vector2.new(
         math.max(0, math.min(screenPos.X, vp.X)),
         math.max(0, math.min(screenPos.Y, vp.Y))
     )
 
-    -- Interpolate from current mouse position
     local newPos = currentMousePos:Lerp(targetScreen, smoothFactor)
 
     -- Use Matcha's absolute mouse move
@@ -471,6 +479,7 @@ end
 -- ===== RENDER LOOP =====
 local lastDrawn = 0
 local dbgClock  = os.clock()
+local lastAimPrint = 0
 
 renderConn = RunService.RenderStepped:Connect(function()
     if not running then return end
@@ -550,9 +559,17 @@ renderConn = RunService.RenderStepped:Connect(function()
     end
 
     -- ---- AIMBOT ----
-    if uiGet("aim_enabled", false) and aimKey and aimKey:IsEnabled() then
+    local aimEnabled = uiGet("aim_enabled", false)
+    local keyActive = aimKey and aimKey:IsEnabled()
+
+    if DEBUG and (os.clock() - lastAimPrint) >= 2 then
+        lastAimPrint = os.clock()
+        print(string.format("[Aimbot Debug] aimEnabled=%s, keyActive=%s, aimKey exists=%s", 
+            tostring(aimEnabled), tostring(keyActive), tostring(aimKey ~= nil)))
+    end
+
+    if aimEnabled and keyActive then
         local smoothVal = uiGet("aim_smooth", 6.0)
-        -- Convert smoothing to lerp factor (higher = slower)
         local factor = math.max(0.01, math.min(0.99, 1 / (smoothVal * 0.5 + 1)))
         local target = getBestTarget()
         if target then
