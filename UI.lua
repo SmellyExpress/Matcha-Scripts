@@ -5,7 +5,7 @@ local HttpService = game:GetService("HttpService")
 local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local DEBUG = true   -- Set to true to see debug output
+local DEBUG = true   -- Keep true for debugging
 
 local DEF = {
     havoc_esp_enabled     = true,
@@ -316,49 +316,54 @@ local function getBestTarget()
 
     local maxDist = uiGet("aim_dist_max", 1500)
     local fovDeg = uiGet("aim_fov", 180)
-    local hitboxMode = uiGet("aim_hitbox", 0) -- 0=Head, 1=Torso, 2=Nearest
+    local hitboxMode = uiGet("aim_hitbox", 0)
 
     local all = getCharacters()
-    if #all == 0 then
-        if DEBUG then print("[Aimbot] No characters found.") end
-        return nil
-    end
+    if DEBUG then print(string.format("[Aimbot] Found %d characters", #all)) end
+    if #all == 0 then return nil end
 
     local best = nil
     local bestAngle = 1e9
 
     for _, entry in ipairs(all) do
         local rootPart = entry.hrp
+        if not rootPart then
+            if DEBUG then print("[Aimbot] Skipping character with no hrp") end
+            goto continue
+        end
         local ok, rootPos = pcall(function() return rootPart.Position end)
-        if ok and rootPos then
-            local dist = (camPos - rootPos).Magnitude
-            if dist <= maxDist then
-                local aimPos = rootPos
-                if hitboxMode == 0 then        -- Head
-                    aimPos = rootPos + Vector3.new(0, 2.6, 0)
-                end
-                -- Torso (1) uses rootPos; Nearest (2) also uses rootPos
+        if not ok or not rootPos then
+            if DEBUG then print("[Aimbot] Failed to get position for", entry.model and entry.model.Name or "unknown") end
+            goto continue
+        end
 
-                local dirToTarget = (aimPos - camPos).Unit
-                local dot = lookDir:Dot(dirToTarget)
-                local clamped = math.max(-1, math.min(1, dot))
-                local angle = math.deg(math.acos(clamped))
+        local dist = (camPos - rootPos).Magnitude
+        if dist <= maxDist then
+            local aimPos = rootPos
+            if hitboxMode == 0 then        -- Head
+                aimPos = rootPos + Vector3.new(0, 2.6, 0)
+            end
 
-                if angle <= fovDeg then
-                    if angle < bestAngle then
-                        bestAngle = angle
-                        best = {
-                            position = aimPos,
-                            rootPos = rootPos,
-                            part = rootPart,
-                            model = entry.model,
-                            distance = dist,
-                            angle = angle
-                        }
-                    end
+            local dirToTarget = (aimPos - camPos).Unit
+            local dot = lookDir:Dot(dirToTarget)
+            local clamped = math.max(-1, math.min(1, dot))
+            local angle = math.deg(math.acos(clamped))
+
+            if angle <= fovDeg then
+                if angle < bestAngle then
+                    bestAngle = angle
+                    best = {
+                        position = aimPos,
+                        rootPos = rootPos,
+                        part = rootPart,
+                        model = entry.model,
+                        distance = dist,
+                        angle = angle
+                    }
                 end
             end
         end
+        ::continue::
     end
 
     if DEBUG and best then
@@ -460,12 +465,14 @@ local function rebuildItems()
 
     local out = {}
     for _, e in ipairs(getCharacters()) do
-        local ok, rootPos = pcall(function() return e.hrp.Position end)
+        local hrp = e.hrp
+        if not hrp then continue end
+        local ok, rootPos = pcall(function() return hrp.Position end)
         if ok and rootPos then
             local d = camP and (camP - rootPos).Magnitude or nil
             if not (d and d > maxDist) then
                 out[#out + 1] = {
-                    part     = e.hrp,
+                    part     = hrp,
                     name     = e.model.Name,
                     distText = d and string.format("%dm", math.floor(d)) or nil,
                 }
@@ -507,6 +514,7 @@ renderConn = RunService.RenderStepped:Connect(function()
 
         for _, it in ipairs(espItems) do
             if slot >= MAX_SLOTS then break end
+            if not it or not it.part then continue end  -- safety check
 
             local ok, rootPos = pcall(function() return it.part.Position end)
             if ok and rootPos then
@@ -561,6 +569,10 @@ renderConn = RunService.RenderStepped:Connect(function()
     -- ---- AIMBOT ----
     local aimEnabled = uiGet("aim_enabled", false)
     local keyActive = aimKey and aimKey:IsEnabled()
+
+    -- For testing, you can also force activation with a key like F (0x46) regardless of UI
+    -- Uncomment the line below to override:
+    -- keyActive = keyActive or iskeypressed(0x46)  -- F key
 
     if DEBUG and (os.clock() - lastAimPrint) >= 2 then
         lastAimPrint = os.clock()
