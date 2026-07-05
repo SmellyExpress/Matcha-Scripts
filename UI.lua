@@ -27,6 +27,7 @@ end
 EntityCache = {
     NPCs = {}
 }
+
 --UI Definition
 if typeof(UI) == "table" and UI.AddTab then
     UI.AddTab("Havoc", function(tab)
@@ -53,7 +54,7 @@ end
 
 local function createScreenText(fontSize)
     local text = Drawing.new("Text")
-    text.FontSize = fontSize or DEFAULT_TEXT_SIZE 
+    text.Size = fontSize or DEFAULT_TEXT_SIZE -- FIX: Changed from FontSize to Size
     text.Center = true
     text.Outline = true
     text.Font = Drawing.Fonts.Monospace 
@@ -150,19 +151,16 @@ local lastDrawnSlots = 0
 
 local renderConnection
 renderConnection = RunService.RenderStepped:Connect(function()
-    -- Safety stop if the script was cleaned up/reloaded
     if not isScriptRunning then
         if renderConnection then renderConnection:Disconnect() end
         return
     end
 
-    -- 1. Check if the ESP is turned on in our UI
     local isEspEnabled = false
     if typeof(UI) == "table" and UI.GetValue then
         isEspEnabled = UI.GetValue("havoc_esp")
     end
 
-    -- If disabled, hide all drawing slots immediately and exit early
     if not isEspEnabled then
         for i = 1, lastDrawnSlots do
             hideVisualSlot(drawingsPool[i])
@@ -176,38 +174,31 @@ renderConnection = RunService.RenderStepped:Connect(function()
     local myCharacter = localPlayer and localPlayer.Character
     local myRootPart = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
 
-    -- 2. Loop through our background cache of NPCs
     for _, npc in ipairs(EntityCache.NPCs or {}) do
         if currentSlotIndex >= MAX_SLOTS then break end
 
-        -- Make sure the NPC is alive and has a primary part to track
         local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
         if npcRoot then
-            -- Translate 3D position to 2D screen coordinates
             local screenPos, onScreen = Camera:WorldToViewportPoint(npcRoot.Position)
 
             if onScreen then
                 currentSlotIndex = currentSlotIndex + 1
                 local slot = drawingsPool[currentSlotIndex]
 
-                -- Calculate accurate sizing based on distance
-                -- (Closer NPCs get bigger boxes, further NPCs get smaller boxes)
                 local distanceToCam = Camera.CoordinateFrame.p - npcRoot.Position
                 local factor = 1 / (distanceToCam.Magnitude * math.tan(math.rad(Camera.FieldOfView / 2))) * 1000
                 local width = math.clamp(factor * 0.6, 10, 150)
                 local height = math.clamp(factor, 15, 200)
 
-                -- Position the API Square object
                 slot.box.Position = Vector2.new(screenPos.X - (width / 2), screenPos.Y - (height / 2))
                 slot.box.Size = Vector2.new(width, height)
                 slot.box.Visible = true
 
-                -- Position Name Tag (Centered above the box)
                 slot.name.Text = npc.Name
-                slot.name.Position = Vector2.new(screenPos.X, screenPos.Y - (height / 2) - slot.name.FontSize - 2)
+                -- FIX: Changed from slot.name.FontSize to slot.name.Size
+                slot.name.Position = Vector2.new(screenPos.X, screenPos.Y - (height / 2) - slot.name.Size - 2)
                 slot.name.Visible = true
 
-                -- Position Distance Tag (Centered below the box)
                 if myRootPart then
                     local realDistance = math.floor((myRootPart.Position - npcRoot.Position).Magnitude)
                     slot.distance.Text = tostring(realDistance) .. "m"
@@ -220,7 +211,6 @@ renderConnection = RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 3. Clean up any screen slots that aren't being used this frame
     for i = currentSlotIndex + 1, lastDrawnSlots do
         hideVisualSlot(drawingsPool[i])
     end
@@ -228,6 +218,4 @@ renderConnection = RunService.RenderStepped:Connect(function()
 end)
 
 print("[Havoc Project] Step 2 & 3: Rendering engine loaded successfully.")
-
-    
         
