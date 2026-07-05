@@ -52,13 +52,17 @@ local function createScreenBox(color)
     return box
 end
 
-local function createScreenText(fontSizeValue)
+local function createScreenText(desiredSize)
     local text = Drawing.new("Text")
-    text.FontSize = fontSizeValue or DEFAULT_TEXT_SIZE -- Set the integer FontSize
-    text.Center = true
-    text.Outline = true
-    text.Font = Drawing.Fonts.Monospace 
-    text.Color = Color3.fromRGB(235, 235, 235)
+    
+    -- Safety wrap every property assignment individually to guarantee 0 initialization crashes
+    pcall(function() text.FontSize = desiredSize or DEFAULT_TEXT_SIZE end)
+    pcall(function() text.Size = desiredSize or DEFAULT_TEXT_SIZE end)
+    pcall(function() text.Center = true end)
+    pcall(function() text.Outline = true end)
+    pcall(function() text.Font = Drawing.Fonts.Monospace end)
+    pcall(function() text.Color = Color3.fromRGB(235, 235, 235) end)
+    
     text.Visible = false
     return text
 end
@@ -179,25 +183,25 @@ renderConnection = RunService.RenderStepped:Connect(function()
 
         local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
         if npcRoot then
+            -- Note: Using Camera.CurrentCamera or your local Camera instance
             local screenPos, onScreen = Camera:WorldToViewportPoint(npcRoot.Position)
 
             if onScreen then
                 currentSlotIndex = currentSlotIndex + 1
                 local slot = drawingsPool[currentSlotIndex]
 
-                local distanceToCam = Camera.CoordinateFrame.p - npcRoot.Position
-                local factor = 1 / (distanceToCam.Magnitude * math.tan(math.rad(Camera.FieldOfView / 2))) * 1000
+                -- Using a solid fallback coordinate distance factor
+                local distanceToCam = (Camera.Position - npcRoot.Position).Magnitude
+                local factor = 1 / (distanceToCam * math.tan(math.rad(Camera.FieldOfView / 2))) * 1000
                 local width = math.clamp(factor * 0.6, 10, 150)
                 local height = math.clamp(factor, 15, 200)
 
-                slot.name.Text = npc.Name
-                -- Use the explicit property name matching your API definition (.FontSize)
-                slot.name.Position = Vector2.new(screenPos.X, screenPos.Y - (height / 2) - slot.name.FontSize - 2)
-                slot.name.Visible = true
+                slot.box.Position = Vector2.new(screenPos.X - (width / 2), screenPos.Y - (height / 2))
+                slot.box.Size = Vector2.new(width, height)
+                slot.box.Visible = true
 
                 slot.name.Text = npc.Name
-                -- FIX: Changed from slot.name.FontSize to slot.name.Size
-                slot.name.Position = Vector2.new(screenPos.X, screenPos.Y - (height / 2) - slot.name.Size - 2)
+                slot.name.Position = Vector2.new(screenPos.X, screenPos.Y - (height / 2) - DEFAULT_TEXT_SIZE - 2)
                 slot.name.Visible = true
 
                 if myRootPart then
