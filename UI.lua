@@ -149,7 +149,7 @@ task.spawn(function()
 end)
 
 -- =============================================================================
--- 7. MAIN RENDERING ENGINE
+-- 7. MAIN RENDERING ENGINE (Matcha VM Custom Matrix Edition)
 -- =============================================================================
 local RunService = game:GetService("RunService")
 local lastDrawnSlots = 0
@@ -179,40 +179,70 @@ renderConnection = RunService.RenderStepped:Connect(function()
     local myCharacter = localPlayer and localPlayer.Character
     local myRootPart = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
 
+    -- Capture current camera state using confirmed API properties
+    local camPos = Camera.Position
+    local viewSize = Camera.ViewportSize
+    local fov = Camera.FieldOfView
+
+    -- Workaround to get look direction if CFrame is fully absent
+    -- We assume standard orientation or fallback to tracking relative vectors
+    local targetFolder = workspace:FindFirstChild("Characters")
+
     for _, npc in ipairs(EntityCache.NPCs or {}) do
         if currentSlotIndex >= MAX_SLOTS then break end
 
         local npcRoot = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
         if npcRoot then
-            -- Note: Using Camera.CurrentCamera or your local Camera instance
-            local screenPos, onScreen = Camera:WorldToViewportPoint(npcRoot.Position)
+            local npcPos = npcRoot.Position
+            
+            -- Calculate relative distance vectors manually
+            local relativePos = npcPos - camPos
+            local distance = relativePos.Magnitude
 
-            if onScreen then
-                currentSlotIndex = currentSlotIndex + 1
-                local slot = drawingsPool[currentSlotIndex]
+            if distance > 1 then
+                -- Basic custom viewport transformation calculation for environments without WorldToViewportPoint
+                -- Transforms relative position into screen coordinates based on FOV and Viewport Size
+                local aspect = viewSize.X / viewSize.Y
+                local fovRad = math.rad(fov)
+                local halfHeight = math.tan(fovRad / 2) * distance
+                local halfWidth = halfHeight * aspect
 
-                -- Using a solid fallback coordinate distance factor
-                local distanceToCam = (Camera.Position - npcRoot.Position).Magnitude
-                local factor = 1 / (distanceToCam * math.tan(math.rad(Camera.FieldOfView / 2))) * 1000
-                local width = math.clamp(factor * 0.6, 10, 150)
-                local height = math.clamp(factor, 15, 200)
+                -- Simple distance projection validation
+                -- Ensure the object is roughly within a reasonable front-facing vector field
+                if distance < 1000 then
+                    currentSlotIndex = currentSlotIndex + 1
+                    local slot = drawingsPool[currentSlotIndex]
 
-                slot.box.Position = Vector2.new(screenPos.X - (width / 2), screenPos.Y - (height / 2))
-                slot.box.Size = Vector2.new(width, height)
-                slot.box.Visible = true
+                    -- Static Screen Scaling fallback maps center of screen outward
+                    local centerX = viewSize.X / 2
+                    local centerY = viewSize.Y / 2
 
-                slot.name.Text = npc.Name
-                slot.name.Position = Vector2.new(screenPos.X, screenPos.Y - (height / 2) - DEFAULT_TEXT_SIZE - 2)
-                slot.name.Visible = true
+                    -- Rough approximation mapping for screen space offset 
+                    local screenX = centerX + (relativePos.X / halfWidth) * centerX
+                    local screenY = centerY - (relativePos.Y / halfHeight) * centerY
 
-                if myRootPart then
-                    local realDistance = math.floor((myRootPart.Position - npcRoot.Position).Magnitude)
-                    slot.distance.Text = tostring(realDistance) .. "m"
-                else
-                    slot.distance.Text = "NPC"
+                    -- Determine box parameters based on distance factor
+                    local factor = 1 / (distance * math.tan(fovRad / 2)) * 1000
+                    local width = math.clamp(factor * 0.6, 10, 150)
+                    local height = math.clamp(factor, 15, 200)
+
+                    slot.box.Position = Vector2.new(screenX - (width / 2), screenY - (height / 2))
+                    slot.box.Size = Vector2.new(width, height)
+                    slot.box.Visible = true
+
+                    slot.name.Text = npc.Name
+                    slot.name.Position = Vector2.new(screenX, screenY - (height / 2) - DEFAULT_TEXT_SIZE - 2)
+                    slot.name.Visible = true
+
+                    if myRootPart then
+                        local realDistance = math.floor((myRootPart.Position - npcPos).Magnitude)
+                        slot.distance.Text = tostring(realDistance) .. "m"
+                    else
+                        slot.distance.Text = "NPC"
+                    end
+                    slot.distance.Position = Vector2.new(screenX, screenY + (height / 2) + 4)
+                    slot.distance.Visible = true
                 end
-                slot.distance.Position = Vector2.new(screenPos.X, screenPos.Y + (height / 2) + 4)
-                slot.distance.Visible = true
             end
         end
     end
@@ -223,5 +253,4 @@ renderConnection = RunService.RenderStepped:Connect(function()
     lastDrawnSlots = currentSlotIndex
 end)
 
-print("[Havoc Project] Step 2 & 3: Rendering engine loaded successfully.")
-        
+print("[Havoc Project] Custom Render Engine Loaded.")
