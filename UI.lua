@@ -57,18 +57,30 @@ local function updateNpcCache()
     local PlayersService = game:GetService("Players")
     if not PlayersService then return end
     
-    local localCharacter = PlayersService.LocalPlayer and PlayersService.LocalPlayer.Character
     local charactersFolder = workspace:FindFirstChild("Characters")
     if charactersFolder then
-        collectNpcsFromFolder(charactersFolder, PlayersService, localCharacter, EntityCache.NPCs)
-    else
-        for _, object in ipairs(workspace:GetChildren()) do
-            if object:IsA("Model") and object:FindFirstChildOfClass("Humanoid") then
-                if object ~= localCharacter and not PlayersService:GetPlayerFromCharacter(object) then
-                    table.insert(EntityCache.NPCs, object)
+        local children = charactersFolder:GetChildren()
+        print(string.format("--- [DIAGNOSTIC] Found %d total items inside Characters folder ---", #children))
+        
+        for _, child in ipairs(children) do
+            -- Print the name of the object and its Class Type (e.g., Model, Folder, Part)
+            print("Name: " .. tostring(child.Name) .. " | Class: " .. tostring(child.ClassName))
+            
+            -- See if it has a Humanoid or a RootPart
+            local hasHumanoid = child:FindFirstChildOfClass("Humanoid") and "YES" or "NO"
+            print("  -> Has Humanoid? " .. hasHumanoid)
+            
+            -- Standard NPC check logic
+            if child:IsA("Model") and child:FindFirstChildOfClass("Humanoid") then
+                local isAPlayer = PlayersService:GetPlayerFromCharacter(child)
+                if not isAPlayer then
+                    table.insert(EntityCache.NPCs, child)
                 end
             end
         end
+        print("---------------------------------------------------------")
+    else
+        print("[DIAGNOSTIC] Could not find a folder named 'Characters' in Workspace!")
     end
 end
 
