@@ -62,24 +62,95 @@ local function categorize_loot(name)
 end
 
 -- ============================================================================
--- Config System
+-- Config System with Clipboard
 -- ============================================================================
 
-local CONFIG = {
-	version = 1,
-	loot = {},
-	weapon_mods = {},
+local CONFIG_VERSION = 1
+
+-- All UI keys that should be saved
+local CONFIG_KEYS = {
+	-- Loot Visuals
+	"havoc_loot_enabled",
+	"havoc_loot_text_size",
+	"havoc_loot_distance",
+	"havoc_loot_distance_pos",
+	"havoc_loot_marker",
+	"havoc_loot_filter",
+	"havoc_loot_max_distance",
+	
+	-- Weapon Mods
+	"havoc_no_recoil",
+	"havoc_no_spread",
+	"havoc_no_sway",
+	"havoc_fast_vel",
 }
 
+-- Add all loot type toggles
+for i = 1, #LOOT_TYPES do
+	table.insert(CONFIG_KEYS, LOOT_TYPES[i].key)
+end
+table.insert(CONFIG_KEYS, LOOT_FALLBACK.key)
+table.insert(CONFIG_KEYS, BODY_BAG_TYPE.key)
+
 local function save_config()
-	-- Placeholder for config save functionality
-	-- In production this would write to a file or HTTP request
-	print("[HAVOC] Config saved")
+	local config = {
+		version = CONFIG_VERSION,
+		timestamp = os.time(),
+		values = {}
+	}
+	
+	-- Collect all UI values
+	for i = 1, #CONFIG_KEYS do
+		local key = CONFIG_KEYS[i]
+		local value = UI.GetValue(key)
+		config.values[key] = value
+	end
+	
+	-- Convert to JSON
+	local json_str = game:GetService("HttpService"):JSONEncode(config)
+	
+	-- Copy to clipboard
+	setclipboard(json_str)
+	
+	print("[HAVOC] Config copied to clipboard!")
+	print("[HAVOC] Total values saved: " .. #CONFIG_KEYS)
 end
 
 local function load_config()
-	-- Placeholder for config load functionality
-	print("[HAVOC] Config loaded")
+	-- Get from clipboard
+	local clipboard = getclipboard()
+	
+	if not clipboard or clipboard == "" then
+		print("[HAVOC] ERROR: Clipboard is empty!")
+		return
+	end
+	
+	local success, config = pcall(function()
+		return game:GetService("HttpService"):JSONDecode(clipboard)
+	end)
+	
+	if not success then
+		print("[HAVOC] ERROR: Invalid JSON in clipboard!")
+		return
+	end
+	
+	if not config.values then
+		print("[HAVOC] ERROR: Invalid config format!")
+		return
+	end
+	
+	-- Apply all values
+	local applied_count = 0
+	for key, value in pairs(config.values) do
+		pcall(function()
+			UI.SetValue(key, value)
+			applied_count = applied_count + 1
+		end)
+	end
+	
+	print("[HAVOC] Config loaded successfully!")
+	print("[HAVOC] Values applied: " .. applied_count)
+	print("[HAVOC] Config timestamp: " .. os.date("%Y-%m-%d %H:%M:%S", config.timestamp))
 end
 
 -- ============================================================================
@@ -118,14 +189,17 @@ if UI and UI.AddTab then
 			
 			-- Config Section
 			local config_sec = tab:Section("Config", "Right")
-			config_sec:Button("Save Config", function()
+			config_sec:Text("Save/Load settings via clipboard")
+			config_sec:Button("Save Config", 150, 30, function()
 				save_config()
 			end)
-			config_sec:Button("Load Config", function()
+			config_sec:Button("Load Config", 150, 30, function()
 				load_config()
 			end)
+			config_sec:Spacing()
+			config_sec:Text("Copy JSON from clipboard to share")
 		end)
 	end)
 end
 
-print("[HAVOC ESP] UI loaded!")
+print("[HAVOC ESP] UI loaded with config system!")
