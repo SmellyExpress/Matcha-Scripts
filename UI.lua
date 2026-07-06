@@ -363,6 +363,7 @@ end
 
 -- Aimbot Functions
 local lastMousePos = Vector2.new(0, 0)
+local aimDebug = false
 
 local function isVisible(part)
     local camP = Camera.Position
@@ -384,6 +385,9 @@ local function getAimbotTarget()
     local centerX = Camera.ViewportSize.X / 2
     local centerY = Camera.ViewportSize.Y / 2
     
+    local debugMsg = string.format("[AIM] espItems=%d, fov=%d, visCheck=%s, center=(%d,%d)", 
+        #espItems, fov, tostring(visCheck), centerX, centerY)
+    
     for _, item in ipairs(espItems) do
         local ok, pos = pcall(function() return item.part.Position end)
         if ok and pos then
@@ -393,14 +397,28 @@ local function getAimbotTarget()
                 local dy = screenPos.Y - centerY
                 local dist = math.sqrt(dx * dx + dy * dy)
                 
-                if dist < bestDist then
-                    if not visCheck or isVisible(item.part) then
-                        bestTarget = item
-                        bestDist = dist
-                    end
+                local visOk = true
+                if visCheck then
+                    visOk = isVisible(item.part)
+                end
+                
+                if aimDebug then
+                    debugMsg = debugMsg .. string.format("\n  [%s] screen=(%.0f,%.0f) dist=%.1f visible=%s", 
+                        item.name, screenPos.X, screenPos.Y, dist, tostring(visOk))
+                end
+                
+                if dist < bestDist and visOk then
+                    bestTarget = item
+                    bestDist = dist
                 end
             end
         end
+    end
+    
+    if aimDebug then
+        print(debugMsg)
+        print(string.format("[AIM] best target: %s (dist=%.1f)", 
+            bestTarget and bestTarget.name or "nil", bestDist))
     end
     
     return bestTarget
@@ -415,6 +433,9 @@ local function aimAt(target)
     
     if currentTarget ~= target then
         currentTarget = target
+        if aimDebug then
+            print("[AIM] locked onto: " .. target.name)
+        end
     end
     
     local smooth = uiGet("aim_smooth", DEF.aim_smooth)
@@ -440,8 +461,13 @@ local function aimAt(target)
     local newY = currentPos.Y + (screenPos.Y - currentPos.Y) * smooth
     
     lastMousePos = Vector2.new(newX, newY)
-    if input and input.SetMousePosition then
-        input.SetMousePosition(newX, newY)
+    
+    if aimDebug then
+        print(string.format("[AIM] moving mouse to (%.0f, %.0f)", newX, newY))
+    end
+    
+    if mousemoveabs then
+        mousemoveabs(math.floor(newX), math.floor(newY))
     end
 end
 
