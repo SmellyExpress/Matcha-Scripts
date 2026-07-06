@@ -195,6 +195,8 @@ local function refresh_loot_cache()
 	end
 	loot_by_model = new_by_model
 	loot_cache = out
+	
+	print("[HAVOC] Loot cache refreshed: " .. #out .. " items found")
 end
 
 local loot_live_cursor = 1
@@ -306,6 +308,73 @@ local function run_loot_visuals(cam_pos)
 end
 
 -- ============================================================================
+-- Weapon Mods with getgc/applygc
+-- ============================================================================
+
+local gun_mods_cache = nil
+local gun_mods_keys = {
+	"vPunchBase",
+	"hPunchBase",
+	"vel",
+	"spreadReduce",
+	"spread",
+	"weight",
+	"unAimWeight",
+	"aimWeight",
+}
+
+local function init_gun_mods_cache()
+	if not gun_mods_cache then
+		gun_mods_cache = getgc(gun_mods_keys)
+		print("[HAVOC] Gun mods cache initialized with " .. #gun_mods_cache .. " entries")
+	end
+end
+
+local function apply_gun_mods()
+	if not gun_mods_cache then init_gun_mods_cache() end
+	
+	local mods = {
+		no_recoil = UI.GetValue("havoc_no_recoil"),
+		no_spread = UI.GetValue("havoc_no_spread"),
+		no_sway = UI.GetValue("havoc_no_sway"),
+		fast_vel = UI.GetValue("havoc_fast_vel"),
+	}
+
+	local gc_values = {}
+
+	if mods.no_recoil then
+		gc_values.vPunchBase = 0
+		gc_values.hPunchBase = 0
+		gc_values.weight = 0
+	end
+
+	if mods.no_spread then
+		gc_values.spreadReduce = 100
+		gc_values.spread = {
+			y = {[1] = 0, [2] = 0, [3] = 0},
+			x = {[1] = 0, [2] = 0, [3] = 0},
+			z = {[1] = 0, [2] = 0, [3] = 0},
+		}
+	end
+
+	if mods.no_sway then
+		gc_values.aimWeight = 0
+		gc_values.unAimWeight = 0
+	end
+
+	if mods.fast_vel then
+		gc_values.vel = 100000
+	end
+
+	if next(gc_values) then
+		local count = applygc(gun_mods_cache, gc_values)
+		if count > 0 then
+			print("[HAVOC] Applied " .. count .. " weapon mod values")
+		end
+	end
+end
+
+-- ============================================================================
 -- UI Setup
 -- ============================================================================
 
@@ -343,73 +412,8 @@ if UI and UI.AddTab then
 end
 
 -- ============================================================================
--- Weapon Modifications Implementation
--- ============================================================================
-
-local Spread = {
-    y = {[1] = 0, [2] = 0, [3] = 0},
-    x = {[1] = 0, [2] = 0, [3] = 0},
-    z = {[1] = 0, [2] = 0, [3] = 0},
-}
-
-local Keys = {
-    "vPunchBase", 
-    "hPunchBase", 
-    "vel", 
-    "spreadReduce", 
-    "spread", 
-    "weight",
-    "unAimWeight",
-    "aimWeight",
-}
-
--- SCAN ONCE: Run getgc out here so it never loops or crashes performance
-local WeaponCache = getgc(Keys)
-
-local function update_weapon_mods()
-    -- Safety check if garbage collector scanning failed or returned empty
-    if not WeaponCache or #WeaponCache == 0 then return end
-
-    -- Check UI Toggle States
-    local no_recoil = UI.GetValue("havoc_no_recoil")
-    local no_spread = UI.GetValue("havoc_no_spread")
-    local no_sway   = UI.GetValue("havoc_no_sway")
-    local fast_vel  = UI.GetValue("havoc_fast_vel")
-
-    -- Construct the payload dynamically to avoid passing damaging 'nil' values
-    local mods_to_apply = {}
-
-    if no_recoil then
-        mods_to_apply["vPunchBase"] = 0
-        mods_to_apply["hPunchBase"] = 0
-    end
-
-    if no_spread then
-        mods_to_apply["spreadReduce"] = 100
-        mods_to_apply["spread"] = Spread
-    end
-
-    if fast_vel then
-        mods_to_apply["vel"] = 100000
-    end
-
-    if no_sway then
-        mods_to_apply["weight"] = 0
-        mods_to_apply["aimWeight"] = 0
-        mods_to_apply["unAimWeight"] = 0
-    end
-
-    -- Only invoke applygc if at least one checkbox modifier is active
-    if next(mods_to_apply) ~= nil then
-        applygc(WeaponCache, mods_to_apply)
-    end
-end
-
--- ============================================================================
 -- Main Loop
 -- ============================================================================
-
-local last_mod_update = 0
 
 local function main_loop()
 	refresh_loot_cache()
@@ -418,14 +422,12 @@ local function main_loop()
 	local cam_pos = Camera.Position
 	run_loot_visuals(cam_pos)
 	
-	-- Throttle the updates slightly so it isn't hammering memory 60+ times a second
-	local now = os.clock()
-	if (now - last_mod_update) > 0.3 then
-		last_mod_update = now
-		pcall(update_weapon_mods)
-	end
+	-- Apply gun mods every frame
+	apply_gun_mods()
 end
 
 RunService.RenderStepped:Connect(main_loop)
 
-print("[HAVOC ESP] Loot visuals and weapon mods system loaded!")
+print("[HAVOC ESP] Loot visuals + Weapon mods system loaded!")
+print("[HAVOC ESP] Initializing gun mods cache...")
+init_gun_mods_cache()
