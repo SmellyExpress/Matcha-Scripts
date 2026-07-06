@@ -204,6 +204,7 @@ end
 local V3_HEAD = Vector3.new(0, 2.6, 0)
 local V3_FOOT = Vector3.new(0, 3.2, 0)
 
+-- Reverted back to your original working environment-native implementation
 local WorldToScreenFn = WorldToScreen
 local function worldToScreen(pos)
     return WorldToScreenFn(pos)
@@ -455,11 +456,11 @@ local function aimAtTarget(target, smoothVal)
     end
 end
 
+-- Fixes the explicit nil Enum error by utilizing native context-aware hooks
 local function checkHotkeyActive()
     local key = uiGet("aim_key", AIM_DEF.key)
     if type(key) == "table" and key.Value ~= nil then key = key.Value end
 
-    -- Safe environment-aware hotkey checks without using missing engine Enums
     if key == 0x01 then
         return (ismouse1pressed and ismouse1pressed())
     elseif key == 0x02 then
