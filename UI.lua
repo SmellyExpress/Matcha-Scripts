@@ -1,569 +1,809 @@
 local RunService  = game:GetService("RunService")
 local Players     = game:GetService("Players")
-local Lighting    = game:GetService("Lighting")
-local HttpService = game:GetService("HttpService")
 local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local DEBUG = true
+local TEXT_SIZE = 13
+local HEAD_OFFSET = 2.6
+local FOOT_OFFSET = 3.2
 
-local DEF = {
-    havoc_esp_enabled     = true,
-    havoc_esp_dist_max    = 1500,
-    havoc_esp_update_rate = 15,
-    havoc_esp_box         = true,
-    havoc_esp_name        = true,
-    havoc_esp_distance    = true,
-    havoc_esp_tracer      = false,
-    havoc_nofog           = false,
-    aim_enabled           = false,
-    aim_fov               = 200,
-    aim_smooth            = 0.3,
-    aim_hitbox            = 0,
-    aim_vis_check         = true,
+local ENTITY_SCAN_INTERVAL = 1.0
+local PLAYER_MATCH_DIST = 5.0
+local FOLDER_POLL_INTERVAL = 0.25
+
+-- ============================================================================
+-- Loot Configuration
+-- ============================================================================
+
+local LOOT_TYPES = {
+    { key = "loot_medium_crate", match = "Medium Wooden Crate", display = "Medium Wooden Crate", color = { 0.62, 0.44, 0.24, 1.0 } },
+    { key = "loot_complex_crate", match = "Complex Crate", display = "Complex Crate", color = { 0.55, 0.55, 0.6, 1.0 } },
+    { key = "loot_military_crate", match = "Military Crate", display = "Military Crate", color = { 0.3, 0.55, 0.3, 1.0 } },
+    { key = "loot_wooden_crate", match = "Wooden Crate", display = "Wooden Crate", color = { 0.55, 0.4, 0.25, 1.0 } },
+    { key = "loot_weapon_locker", match = "Weapon Locker", display = "Weapon Locker", color = { 1.0, 0.4, 0.2, 1.0 } },
+    { key = "loot_weapon_box", match = "Weapon Box", display = "Weapon Box", color = { 1.0, 0.35, 0.25, 1.0 } },
+    { key = "loot_medical_box", match = "Medical Box", display = "Medical Box", color = { 0.9, 0.2, 0.2, 1.0 } },
+}
+local LOOT_FALLBACK = { key = "loot_other", display = "Other Loot", color = { 0.8, 0.8, 0.8, 1.0 } }
+local BODY_BAG_TYPE = { key = "loot_body_bag", display = "Body Bag", color = { 0.35, 0.35, 0.35, 1.0 } }
+
+local function name_matches(name, pattern)
+    if type(pattern) == "table" then
+        for i = 1, #pattern do
+            if string.find(name, pattern[i], 1, true) then return true end
+        end
+        return false
+    end
+    return string.find(name, pattern, 1, true) ~= nil
+end
+
+local function categorize_loot(name)
+    for i = 1, #LOOT_TYPES do
+        local entry = LOOT_TYPES[i]
+        if name_matches(name, entry.match) then
+            return entry
+        end
+    end
+    return LOOT_FALLBACK
+end
+
+-- ============================================================================
+-- Bone Configuration
+-- ============================================================================
+
+local BONE_NAMES = {
+    "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+    "UpperTorso", "LowerTorso",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
 }
 
-local BOX_COL_DEF = Color3.fromRGB(255, 80, 80)
-local NAME_COL    = Color3.fromRGB(235, 235, 235)
-local DIST_COL    = Color3.fromRGB(170, 170, 170)
-local TRACER_COL  = Color3.fromRGB(255, 80, 80)
-local TEXT_SIZE   = 13
+local SKELETON_R15 = {
+    { "Head", "UpperTorso" }, { "UpperTorso", "LowerTorso" },
+    { "UpperTorso", "LeftUpperArm" }, { "UpperTorso", "RightUpperArm" },
+    { "LeftUpperArm", "LeftLowerArm" }, { "RightUpperArm", "RightLowerArm" },
+    { "LeftLowerArm", "LeftHand" }, { "RightLowerArm", "RightHand" },
+    { "LowerTorso", "LeftUpperLeg" }, { "LowerTorso", "RightUpperLeg" },
+    { "LeftUpperLeg", "LeftLowerLeg" }, { "RightUpperLeg", "RightLowerLeg" },
+    { "LeftLowerLeg", "LeftFoot" }, { "RightLowerLeg", "RightFoot" },
+}
+local SKELETON_R6 = {
+    { "Head", "Torso" }, { "Torso", "Left Arm" }, { "Torso", "Right Arm" },
+    { "Torso", "Left Leg" }, { "Torso", "Right Leg" },
+}
 
-local function uiGet(key, fallback)
-    if typeof(UI) == "table" and UI.GetValue then
-        local v = UI.GetValue(key)
-        if v ~= nil then return v end
-    end
-    return fallback
-end
+-- ============================================================================
+-- Entity Collection
+-- ============================================================================
 
-local function uiColor(key, fallback)
-    if typeof(UI) == "table" and UI.GetValue then
-        local ok, r, g, b = pcall(function() return UI.GetValue(key) end)
-        if ok and type(r) == "number" then return Color3.new(r, g, b) end
-    end
-    return fallback
-end
+local function collect_body_parts(model)
+    local parts = {}
+    local sizes = {}
+    local ok, children = pcall(function() return model:GetChildren() end)
+    if not ok or not children then return parts, sizes end
 
-local _off = {}
-pcall(function()
-    local res = game:HttpGet("https://offsets.imtheo.lol/Offsets.json")
-    local decoded = HttpService:JSONDecode(res)
-    _off = (decoded and decoded.Offsets) or {}
-end)
-
-local function off(section, key, fallback)
-    local s = _off[section]
-    return (s and s[key]) or fallback
-end
-
-local OFF_FOG_END      = off("Lighting",   "FogEnd",   0x13C)
-local OFF_FOG_START    = off("Lighting",   "FogStart", 0x140)
-local OFF_ATMO_DENSITY = off("Atmosphere", "Density",  0x0E8)
-local OFF_ATMO_GLARE   = off("Atmosphere", "Glare",    0x0EC)
-local OFF_ATMO_HAZE    = off("Atmosphere", "Haze",     0x0F0)
-local OFF_ATMO_OFFSET  = off("Atmosphere", "Offset",   0x0F4)
-
-local lightingAddr, atmoAddr = 0, 0
-local origFogEnd, origFogStart = 100000, 0
-local origDensity, origGlare, origHaze, origOffset = 0.3, 0, 0, 0.25
-local fogCaptured = false
-local lastNoFog = false
-
-local function captureFog()
-    fogCaptured = true
-    pcall(function() lightingAddr = Lighting.Address or 0 end)
-    pcall(function() origFogEnd = Lighting.FogEnd; origFogStart = Lighting.FogStart end)
-    local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
-    if atmo then
-        pcall(function() atmoAddr = atmo.Address or 0 end)
-        pcall(function()
-            origDensity = atmo.Density; origGlare = atmo.Glare
-            origHaze    = atmo.Haze;    origOffset = atmo.Offset
-        end)
-    end
-end
-
-local function applyNoFog()
-    if not fogCaptured then captureFog() end
-    if not memory_write then return end
-    pcall(function()
-        if lightingAddr ~= 0 then
-            memory_write("float", lightingAddr + OFF_FOG_END,   9e8)
-            memory_write("float", lightingAddr + OFF_FOG_START, 9e8)
-        end
-        if atmoAddr ~= 0 then
-            memory_write("float", atmoAddr + OFF_ATMO_DENSITY, 0)
-            memory_write("float", atmoAddr + OFF_ATMO_GLARE,   0)
-            memory_write("float", atmoAddr + OFF_ATMO_HAZE,    0)
-            memory_write("float", atmoAddr + OFF_ATMO_OFFSET,  0)
-        end
-    end)
-end
-
-local function restoreFog()
-    if not fogCaptured or not memory_write then return end
-    pcall(function()
-        if lightingAddr ~= 0 then
-            memory_write("float", lightingAddr + OFF_FOG_END,   origFogEnd)
-            memory_write("float", lightingAddr + OFF_FOG_START, origFogStart)
-        end
-        if atmoAddr ~= 0 then
-            memory_write("float", atmoAddr + OFF_ATMO_DENSITY, origDensity)
-            memory_write("float", atmoAddr + OFF_ATMO_GLARE,   origGlare)
-            memory_write("float", atmoAddr + OFF_ATMO_HAZE,    origHaze)
-            memory_write("float", atmoAddr + OFF_ATMO_OFFSET,  origOffset)
-        end
-    end)
-end
-
-if _G.HAVOC_ESP_CLEANUP then pcall(_G.HAVOC_ESP_CLEANUP) end
-
-local running  = true
-local drawings = {}
-
-local function track(obj)
-    drawings[obj] = true
-    return obj
-end
-
-local renderConn = nil
-_G.HAVOC_ESP_CLEANUP = function()
-    running = false
-    if renderConn then
-        pcall(function() renderConn:Disconnect() end)
-        renderConn = nil
-    end
-    for obj in pairs(drawings) do
-        pcall(function() obj:Remove() end)
-    end
-    drawings = {}
-    pcall(restoreFog)
-end
-
-local FONT      = Drawing.Fonts.Monospace or Drawing.Fonts.System
-local MAX_SLOTS = 40
-
-local function newLine(color, thickness)
-    local l = track(Drawing.new("Line"))
-    l.Thickness = thickness or 1
-    l.Color     = color or Color3.new(1, 1, 1)
-    l.Visible   = false
-    return l
-end
-
-local function newText(size, center)
-    local t = track(Drawing.new("Text"))
-    t.Size    = size or TEXT_SIZE
-    t.Center  = center ~= false
-    t.Outline = true
-    t.Font    = FONT
-    t.Visible = false
-    return t
-end
-
-local function newSlot()
-    return {
-        box    = { newLine(BOX_COL_DEF), newLine(BOX_COL_DEF), newLine(BOX_COL_DEF), newLine(BOX_COL_DEF) },
-        name   = newText(TEXT_SIZE, true),
-        dist   = newText(TEXT_SIZE, true),
-        tracer = newLine(TRACER_COL),
-    }
-end
-
-local slots = {}
-for i = 1, MAX_SLOTS do slots[i] = newSlot() end
-
-local function hideSlot(s)
-    for i = 1, 4 do s.box[i].Visible = false end
-    s.name.Visible   = false
-    s.dist.Visible   = false
-    s.tracer.Visible = false
-end
-
-local function drawBox(s, x, y, w, h, col)
-    local tl = Vector2.new(x, y)
-    local tr = Vector2.new(x + w, y)
-    local bl = Vector2.new(x, y + h)
-    local br = Vector2.new(x + w, y + h)
-    s.box[1].From, s.box[1].To = tl, tr
-    s.box[2].From, s.box[2].To = bl, br
-    s.box[3].From, s.box[3].To = tl, bl
-    s.box[4].From, s.box[4].To = tr, br
-    for i = 1, 4 do
-        s.box[i].Color   = col
-        s.box[i].Visible = true
-    end
-end
-
-local V3_HEAD = Vector3.new(0, 2.6, 0)
-local V3_FOOT = Vector3.new(0, 3.2, 0)
-
-local WorldToScreenFn = WorldToScreen
-local function worldToScreen(pos)
-    return WorldToScreenFn(pos)
-end
-
-local eyePart, eyeStamp = nil, 0
-local EYE_TTL = 1.0
-
-local function getEyePos()
-    local cp = Camera and Camera.Position
-    if cp and (cp.X ~= 0 or cp.Y ~= 0 or cp.Z ~= 0) then return cp end
-
-    local now = os.clock()
-    if not eyePart or (now - eyeStamp) > EYE_TTL then
-        eyeStamp = now
-        eyePart = nil
-        local ch = LocalPlayer and LocalPlayer.Character
-        if ch then
-            eyePart = ch:FindFirstChild("HumanoidRootPart")
-                or ch:FindFirstChild("Head")
-                or ch:FindFirstChildWhichIsA("BasePart")
-        end
-        if not eyePart then
-            local uid = LocalPlayer and LocalPlayer.UserId
-            local folder = workspace:FindFirstChild("Characters")
-            if uid and folder then
-                for _, c in ipairs(folder:GetChildren()) do
-                    local ok, lid = pcall(function() return c:GetAttribute("LinkPlayerId") end)
-                    if ok and lid == uid then
-                        eyePart = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChildWhichIsA("BasePart")
-                        break
-                    end
+    for i = 1, #children do
+        local child = children[i]
+        local cls = child.ClassName
+        if cls == "Part" or cls == "MeshPart" then
+            for j = 1, #BONE_NAMES do
+                if child.Name == BONE_NAMES[j] then
+                    parts[child.Name] = child
+                    local ok_size, size = pcall(function() return child.Size end)
+                    sizes[child.Name] = ok_size and size or nil
+                    break
                 end
             end
         end
     end
 
-    if eyePart then
-        local ok, p = pcall(function() return eyePart.Position end)
-        if ok and p then return p end
-    end
-    return nil
+    return parts, sizes
 end
 
--- Re-purposed recursive collection function that enforces active player blacklisting
-local function collectFrom(inst, myChar, playerNames, out, depth)
-    if depth > 8 then return end
-    local ok, kids = pcall(function() return inst:GetChildren() end)
-    if not ok or not kids then return end
+local function is_player_character(model, root, players)
+    for i = 1, #players do
+        local char = players[i].Character
+        if char and char == model then return true end
+    end
 
-    for _, child in ipairs(kids) do
-        if child ~= myChar and not playerNames[child.Name] then
-            local hum
-            pcall(function() hum = child:FindFirstChildOfClass("Humanoid") end)
+    local ok, pos = pcall(function() return root.Position end)
+    if not ok or not pos then return false end
+
+    for i = 1, #players do
+        local ok_ppos, ppos = pcall(function() return players[i].Position end)
+        if ok_ppos and ppos and (pos - ppos).Magnitude < PLAYER_MATCH_DIST then return true end
+    end
+
+    if LocalPlayer then
+        local ok_char, char = pcall(function() return LocalPlayer.Character end)
+        if ok_char and char and char == model then return true end
+
+        local ok_lp_pos, lp_pos = pcall(function() return LocalPlayer.Position end)
+        if ok_lp_pos and lp_pos and (pos - lp_pos).Magnitude < PLAYER_MATCH_DIST then return true end
+    end
+
+    return false
+end
+
+local entity_by_model = {}
+
+local function get_or_create_entity(model, root, humanoid)
+    local entry = entity_by_model[model]
+    if entry then return entry end
+
+    local parts, part_sizes = collect_body_parts(model)
+    entry = { model = model, root = root, humanoid = humanoid, parts = parts, part_size = part_sizes }
+    entity_by_model[model] = entry
+    return entry
+end
+
+local function collect_entities(container, players, out, depth)
+    if depth > 6 then return end
+
+    local ok, children = pcall(function() return container:GetChildren() end)
+    if not ok or not children then return end
+
+    for i = 1, #children do
+        local child = children[i]
+        local cls = child.ClassName
+
+        if cls == "Model" or cls == "WorldModel" then
+            local hum = child:FindFirstChildOfClass("Humanoid")
             if hum then
-                local hrp = child:FindFirstChild("HumanoidRootPart")
+                local root = child:FindFirstChild("HumanoidRootPart")
                     or child:FindFirstChild("Torso")
                     or child:FindFirstChild("UpperTorso")
                     or child:FindFirstChild("Head")
-                if not hrp then
-                    pcall(function() hrp = child:FindFirstChildWhichIsA("BasePart") end)
-                end
-                if hrp then
-                    out[#out + 1] = { model = child, hrp = hrp }
+                    or child:FindFirstChildWhichIsA("BasePart")
+
+                if root and not is_player_character(child, root, players) then
+                    out[#out + 1] = get_or_create_entity(child, root, hum)
                 end
             else
-                local cn = child.ClassName
-                if cn == "Model" or cn == "Folder" then
-                    collectFrom(child, myChar, playerNames, out, depth + 1)
+                collect_entities(child, players, out, depth + 1)
+            end
+        elseif cls == "Folder" then
+            collect_entities(child, players, out, depth + 1)
+        end
+    end
+end
+
+local characters_folder = nil
+
+local function get_entity_root()
+    if not characters_folder then
+        characters_folder = game.Workspace:FindFirstChild("Characters")
+    end
+    return characters_folder
+end
+
+local entity_cache = {}
+local entity_cache_stamp = 0
+
+local function refresh_entity_cache()
+    local now = os.clock()
+    local interval = characters_folder and ENTITY_SCAN_INTERVAL or FOLDER_POLL_INTERVAL
+    if (now - entity_cache_stamp) < interval then return end
+    entity_cache_stamp = now
+
+    local root = get_entity_root()
+    if not root then return end
+
+    local players = Players:GetPlayers()
+    local out = {}
+    collect_entities(root, players, out, 0)
+
+    local new_by_model = {}
+    for i = 1, #out do
+        new_by_model[out[i].model] = out[i]
+    end
+    entity_by_model = new_by_model
+    entity_cache = out
+end
+
+-- ============================================================================
+-- Loot Collection
+-- ============================================================================
+
+local function get_loot_info(model)
+    local data = model:FindFirstChild("data")
+    if not data or data.ClassName ~= "Configuration" then return nil end
+
+    local is_open = data:FindFirstChild("isOpen")
+    local is_locked = data:FindFirstChild("isLocked")
+    if not (is_open and is_locked) then return nil end
+
+    return is_open, is_locked
+end
+
+local loot_by_model = {}
+
+local function get_or_create_loot(model, root, category, is_open_inst, is_locked_inst)
+    local entry = loot_by_model[model]
+    if entry then return entry end
+
+    local ok_pos, pos = pcall(function() return root.Position end)
+    entry = {
+        model = model,
+        root = root,
+        pos = ok_pos and pos or nil,
+        is_open_inst = is_open_inst,
+        is_locked_inst = is_locked_inst,
+        is_open = nil,
+        is_locked = nil,
+        category = category,
+    }
+    loot_by_model[model] = entry
+    return entry
+end
+
+local function collect_loot(container, out, depth)
+    if depth > 8 then return end
+
+    local ok, children = pcall(function() return container:GetChildren() end)
+    if not ok or not children then return end
+
+    for i = 1, #children do
+        local child = children[i]
+        local cls = child.ClassName
+
+        if cls == "Model" then
+            local is_open, is_locked = get_loot_info(child)
+            if is_open then
+                local root = child:FindFirstChildWhichIsA("BasePart")
+                if root then
+                    out[#out + 1] = get_or_create_loot(child, root, categorize_loot(child.Name), is_open, is_locked)
+                end
+            else
+                collect_loot(child, out, depth + 1)
+            end
+        elseif cls == "Folder" or cls == "WorldModel" then
+            collect_loot(child, out, depth + 1)
+        end
+    end
+end
+
+local buildings_folder = nil
+
+local function get_buildings_folder()
+    if not buildings_folder then
+        buildings_folder = game.Workspace:FindFirstChild("Buildings")
+    end
+    return buildings_folder
+end
+
+local function collect_body_bags(buildings, out)
+    local loots1 = buildings:FindFirstChild("Loots")
+    if not loots1 then return end
+    local loots2 = loots1:FindFirstChild("Loots")
+    if not loots2 then return end
+    local characters = loots2:FindFirstChild("Characters")
+    if not characters then return end
+
+    local ok, children = pcall(function() return characters:GetChildren() end)
+    if not ok or not children then return end
+
+    for i = 1, #children do
+        local child = children[i]
+        if child.ClassName == "Model" then
+            local root = child:FindFirstChildWhichIsA("BasePart")
+            if root then
+                out[#out + 1] = get_or_create_loot(child, root, BODY_BAG_TYPE, nil, nil)
+            end
+        end
+    end
+end
+
+local loot_cache = {}
+local loot_cache_stamp = 0
+
+local function refresh_loot_cache()
+    local now = os.clock()
+    local interval = buildings_folder and 30.0 or FOLDER_POLL_INTERVAL
+    if (now - loot_cache_stamp) < interval then return end
+    loot_cache_stamp = now
+
+    local out = {}
+    local buildings = get_buildings_folder()
+    if buildings then
+        local ok, children = pcall(function() return buildings:GetChildren() end)
+        if ok and children then
+            for i = 1, #children do
+                local loots = children[i]:FindFirstChild("Loots")
+                if loots then
+                    collect_loot(loots, out, 0)
+                end
+            end
+        end
+        collect_body_bags(buildings, out)
+    end
+
+    local new_by_model = {}
+    for i = 1, #out do
+        new_by_model[out[i].model] = out[i]
+    end
+    loot_by_model = new_by_model
+    loot_cache = out
+end
+
+local loot_live_cursor = 1
+
+local function refresh_loot_live()
+    local n = #loot_cache
+    if n == 0 then return end
+
+    if loot_live_cursor > n then loot_live_cursor = 1 end
+
+    local remaining = math.min(60, n)
+    while remaining > 0 do
+        local loot = loot_cache[loot_live_cursor]
+        if loot.is_open_inst then
+            local ok, is_open_val, is_locked_val = pcall(function()
+                return loot.is_open_inst.Value, loot.is_locked_inst.Value
+            end)
+            if ok then
+                loot.is_open = is_open_val
+                loot.is_locked = is_locked_val
+            end
+        end
+
+        loot_live_cursor = loot_live_cursor + 1
+        if loot_live_cursor > n then loot_live_cursor = 1 end
+        remaining = remaining - 1
+    end
+end
+
+-- ============================================================================
+-- Aimbot
+-- ============================================================================
+
+local function get_aim_part(ent, bone_idx)
+    if bone_idx == 0 then
+        return ent.parts["Head"] or ent.root
+    else
+        return ent.parts["Torso"] or ent.parts["UpperTorso"] or ent.root
+    end
+end
+
+local function evaluate_candidate(ent, bone_idx, cam_pos, max_dist)
+    local health = ent.humanoid.Health
+    if not (health and health > 0) then return nil end
+
+    local part = get_aim_part(ent, bone_idx)
+    if not part then return nil end
+
+    local pos = part.Position
+    if not pos then return nil end
+
+    local dist = (cam_pos - pos).Magnitude
+    if max_dist > 0 and dist > max_dist then return nil end
+
+    return pos, dist
+end
+
+local aimbot_prev_target = nil
+local aimbot_locked_ent = nil
+local aimbot_next_acquire = 0
+local aimbot_draw_state = { scx = nil, scy = nil, fov = 150, draw_fov = false, active = false, tx = 0, ty = 0 }
+
+local function aimbot_tick()
+    if not UI.GetValue("havoc_aimbot_enabled") then
+        aimbot_prev_target = nil
+        aimbot_locked_ent = nil
+        aimbot_draw_state.scx = nil
+        aimbot_draw_state.active = false
+        return
+    end
+
+    local settings = {
+        fov = UI.GetValue("havoc_aimbot_fov"),
+        draw_fov = UI.GetValue("havoc_aimbot_draw_fov"),
+        bone_idx = UI.GetValue("havoc_aimbot_bone"),
+        target_type = UI.GetValue("havoc_aimbot_target_type"),
+        max_dist = UI.GetValue("havoc_aimbot_max_distance"),
+    }
+
+    local vp = Camera.ViewportSize
+    local scx = vp.X * 0.5
+    local scy = vp.Y * 0.5
+
+    aimbot_draw_state.scx = scx
+    aimbot_draw_state.scy = scy
+    aimbot_draw_state.fov = settings.fov
+    aimbot_draw_state.draw_fov = settings.draw_fov
+
+    local now = os.clock()
+    local cam_pos = Camera.Position
+
+    local best_pos, best_model = nil, nil
+
+    if aimbot_locked_ent and now < aimbot_next_acquire then
+        local pos = evaluate_candidate(aimbot_locked_ent, settings.bone_idx, cam_pos, settings.max_dist)
+        if pos then
+            local sx, sy, svis = WorldToScreen(pos)
+            if svis then
+                best_pos = pos
+                best_model = aimbot_locked_ent.model
+            end
+        end
+    end
+
+    if not best_pos then
+        aimbot_next_acquire = now + 0.05
+
+        local best_score = math.huge
+        local best_ent = nil
+
+        for i = 1, #entity_cache do
+            local ent = entity_cache[i]
+            local pos, dist = evaluate_candidate(ent, settings.bone_idx, cam_pos, settings.max_dist)
+            if pos then
+                local sx, sy, svis = WorldToScreen(pos)
+                if svis then
+                    local dx, dy = sx - scx, sy - scy
+                    local px_dist = math.sqrt(dx * dx + dy * dy)
+                    local is_incumbent = ent.model == aimbot_prev_target
+                    local effective_fov = is_incumbent and (settings.fov * 1.15) or settings.fov
+                    if px_dist <= effective_fov then
+                        local score = (settings.target_type == 1) and dist or px_dist
+                        local effective_score = is_incumbent and (score * 0.75) or score
+                        if effective_score < best_score then
+                            best_score = effective_score
+                            best_pos = pos
+                            best_model = ent.model
+                            best_ent = ent
+                        end
+                    end
+                end
+            end
+        end
+
+        aimbot_locked_ent = best_ent
+    end
+
+    aimbot_prev_target = best_model
+
+    if best_pos then
+        local fx, fy, fvis = WorldToScreen(best_pos)
+        if fvis then
+            aimbot_draw_state.active = true
+            aimbot_draw_state.tx = fx
+            aimbot_draw_state.ty = fy
+        else
+            aimbot_draw_state.active = false
+        end
+    else
+        aimbot_draw_state.active = false
+    end
+end
+
+-- ============================================================================
+-- Drawing
+-- ============================================================================
+
+local function draw_aimbot_visuals()
+    if not UI.GetValue("havoc_aimbot_enabled") then return end
+    if aimbot_draw_state.scx == nil then return end
+
+    if aimbot_draw_state.draw_fov then
+        draw.Circle(aimbot_draw_state.scx, aimbot_draw_state.scy, aimbot_draw_state.fov,
+            { 1.0, 1.0, 1.0, 1.0 }, 48)
+    end
+
+    if aimbot_draw_state.active and UI.GetValue("havoc_aimbot_target_line") then
+        draw.Line(aimbot_draw_state.scx, aimbot_draw_state.scy, aimbot_draw_state.tx, aimbot_draw_state.ty,
+            { 1.0, 0.3, 0.3, 1.0 })
+    end
+end
+
+local function get_held_item_name(ent)
+    local model_children = ent.model:GetChildren()
+    if model_children then
+        for i = 1, #model_children do
+            local child = model_children[i]
+            if child.ClassName == "Tool" then
+                return child.Name
+            end
+        end
+    end
+
+    for _, part in pairs(ent.parts) do
+        local children = part:GetChildren()
+        if children then
+            for i = 1, #children do
+                local child = children[i]
+                if child.ClassName == "Model" and child:FindFirstChild("Handle") then
+                    return child.Name
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+local function draw_entity_skeleton(part_pos, color)
+    local bone_list = part_pos["UpperTorso"] and SKELETON_R15 or SKELETON_R6
+
+    for i = 1, #bone_list do
+        local pos1 = part_pos[bone_list[i][1]]
+        local pos2 = part_pos[bone_list[i][2]]
+        if pos1 and pos2 then
+            local x1, y1, vis1 = WorldToScreen(pos1)
+            local x2, y2, vis2 = WorldToScreen(pos2)
+            if vis1 and vis2 then
+                draw.Line(x1, y1, x2, y2, { 0, 0, 0, 0.78 }, 3.0)
+                draw.Line(x1, y1, x2, y2, color, 1.5)
+            end
+        end
+    end
+end
+
+local function get_entity_bounds_fallback(root_pos)
+    local top_x, top_y, top_ok = WorldToScreen(root_pos + Vector3.new(0, HEAD_OFFSET, 0))
+    local bot_x, bot_y, bot_ok = WorldToScreen(root_pos - Vector3.new(0, FOOT_OFFSET, 0))
+
+    if not (top_ok and bot_ok) then
+        return { valid = false }
+    end
+
+    local height = math.abs(bot_y - top_y)
+    if height < 1 then height = 1 end
+    local width = height * 0.5
+
+    return { x = top_x - width * 0.5, y = top_y, w = width, h = height, valid = true }
+end
+
+local function draw_esp(bounds, name_str, dist_val, opts)
+    if not bounds.valid then return end
+
+    if opts.box then
+        draw.CornerBox(bounds.x, bounds.y, bounds.w, bounds.h, opts.box_color)
+    end
+
+    if opts.health_bar then
+        draw.HealthBar(bounds.x, bounds.y, bounds.h, opts.health, opts.max_health)
+    end
+
+    if opts.name then
+        local tw = draw.GetTextSize(name_str, TEXT_SIZE)
+        draw.Text(bounds.x + (bounds.w - tw) * 0.5, bounds.y - TEXT_SIZE - 4, name_str, opts.name_color, TEXT_SIZE)
+    end
+
+    local below_y = bounds.y + bounds.h + 4
+
+    if opts.held_item then
+        local tw = draw.GetTextSize(opts.held_item, TEXT_SIZE)
+        draw.Text(bounds.x + (bounds.w - tw) * 0.5, below_y, opts.held_item, opts.held_item_color, TEXT_SIZE)
+        below_y = below_y + TEXT_SIZE + 2
+    end
+
+    if opts.dist then
+        local dist_str = string.format("%dm", math.floor(dist_val))
+        local tw = draw.GetTextSize(dist_str, TEXT_SIZE)
+        draw.Text(bounds.x + (bounds.w - tw) * 0.5, below_y, dist_str, opts.dist_color, TEXT_SIZE)
+    end
+end
+
+local function run_entity_visuals(cam_pos)
+    if not UI.GetValue("havoc_entity_enabled") then return end
+
+    local opts = {
+        box = UI.GetValue("havoc_entity_box"),
+        box_color = { 1.0, 0.31, 0.31, 1.0 },
+        name = UI.GetValue("havoc_entity_name"),
+        name_color = { 0.92, 0.92, 0.92, 1.0 },
+        dist = UI.GetValue("havoc_entity_distance"),
+        dist_color = { 0.67, 0.67, 0.67, 1.0 },
+        health_bar = UI.GetValue("havoc_entity_health_bar"),
+        health_text = UI.GetValue("havoc_entity_health_text"),
+        health_text_color = { 0.3, 1.0, 0.4, 1.0 },
+    }
+
+    local skeleton_on = UI.GetValue("havoc_entity_skeleton")
+    local skeleton_color = { 1.0, 1.0, 1.0, 1.0 }
+    local held_item_on = UI.GetValue("havoc_entity_held_item")
+    local held_item_color = { 1.0, 0.85, 0.4, 1.0 }
+    local hide_dead = UI.GetValue("havoc_entity_hide_dead")
+    local max_dist = UI.GetValue("havoc_entity_max_distance")
+
+    for i = 1, #entity_cache do
+        local ent = entity_cache[i]
+        local health = ent.humanoid.Health or 0
+        local max_health = ent.humanoid.MaxHealth or 100
+
+        if not (hide_dead and health <= 0) then
+            local root_pos = ent.root.Position
+            if root_pos then
+                local dist = (cam_pos - root_pos).Magnitude
+                if dist <= max_dist then
+                    local part_pos = {}
+                    for name, part in pairs(ent.parts) do
+                        local pos = part.Position
+                        if pos then part_pos[name] = pos end
+                    end
+
+                    if skeleton_on then draw_entity_skeleton(part_pos, skeleton_color) end
+
+                    local bounds = get_entity_bounds_fallback(root_pos)
+                    if bounds.valid then
+                        local name_str = ent.model.Name
+                        if opts.health_text then
+                            name_str = name_str .. string.format(" [%d/%d]", math.max(0, math.floor(health)), math.floor(max_health))
+                        end
+
+                        opts.health = health
+                        opts.max_health = max_health
+                        opts.held_item = held_item_on and get_held_item_name(ent) or nil
+                        opts.held_item_color = held_item_color
+
+                        draw_esp(bounds, name_str, dist, opts)
+                    end
                 end
             end
         end
     end
 end
 
-local charCache, charStamp = {}, 0
-local CHAR_TTL = 0.5
-
-local function getCharacters()
-    local now = os.clock()
-    if (now - charStamp) < CHAR_TTL then return charCache end
-    charStamp = now
-
-    -- Dynamically generate lookup map for real player identities
-    local playerNames = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        playerNames[p.Name] = true
-    end
-
-    local out = {}
-    local folder = workspace:FindFirstChild("Characters")
-    if folder then
-        collectFrom(folder, LocalPlayer and LocalPlayer.Character, playerNames, out, 0)
-    end
-    charCache = out
-    return out
+local function loot_passes_filter(filter_idx, is_open_val, is_locked_val)
+    if filter_idx == 1 then return is_locked_val == true end
+    if filter_idx == 2 then return is_locked_val ~= true end
+    if filter_idx == 3 then return is_open_val == true end
+    if filter_idx == 4 then return is_open_val ~= true end
+    return true
 end
 
+local LOOT_MARKER_RADIUS = 3
+local LOOT_MARKER_GAP = 8
+
+local function draw_loot_label(x, y, display_name, locked, dist, show_dist, color, dist_pos, show_marker)
+    local name_text = display_name
+    if locked then
+        name_text = name_text .. " [Locked]"
+    end
+
+    local dist_text = nil
+    if show_dist then
+        dist_text = string.format("%dm", math.floor(dist))
+        if dist_pos == 0 then
+            name_text = name_text .. " [" .. dist_text .. "]"
+            dist_text = nil
+        end
+    end
+
+    local name_w = draw.GetTextSize(name_text, TEXT_SIZE)
+    local name_x = x - name_w * 0.5
+    local name_y = y - TEXT_SIZE * 0.5
+
+    if show_marker then
+        draw.CircleFilled(x, name_y - LOOT_MARKER_GAP, LOOT_MARKER_RADIUS, color, 12)
+    end
+
+    if dist_text then
+        local dist_w = draw.GetTextSize(dist_text, TEXT_SIZE)
+        if dist_pos == 1 then
+            draw.Text(x - dist_w * 0.5, name_y + TEXT_SIZE + 2, dist_text, color, TEXT_SIZE)
+        elseif dist_pos == 2 then
+            draw.Text(name_x - dist_w - 4, name_y, dist_text, color, TEXT_SIZE)
+        elseif dist_pos == 3 then
+            draw.Text(name_x + name_w + 4, name_y, dist_text, color, TEXT_SIZE)
+        end
+    end
+
+    draw.Text(name_x, name_y, name_text, color, TEXT_SIZE)
+end
+
+local function run_loot_visuals(cam_pos)
+    if not UI.GetValue("havoc_loot_enabled") then return end
+
+    local show_dist = UI.GetValue("havoc_loot_distance")
+    local dist_pos = UI.GetValue("havoc_loot_distance_pos")
+    local show_marker = UI.GetValue("havoc_loot_marker")
+    local max_dist = UI.GetValue("havoc_loot_max_distance")
+    local filter_idx = UI.GetValue("havoc_loot_filter")
+
+    for i = 1, #loot_cache do
+        local loot = loot_cache[i]
+
+        if loot.pos and UI.GetValue(loot.category.key) then
+            if loot_passes_filter(filter_idx, loot.is_open, loot.is_locked) then
+                local dist = (cam_pos - loot.pos).Magnitude
+                if dist <= max_dist then
+                    local sx, sy, sok = WorldToScreen(loot.pos)
+                    if sok then
+                        local color = loot.category.color
+                        draw_loot_label(sx, sy, loot.category.display, loot.is_locked, dist, show_dist, color,
+                            dist_pos, show_marker)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================================
 -- UI Setup
-if typeof(UI) == "table" and UI.AddTab then
+-- ============================================================================
+
+if UI and UI.AddTab then
     pcall(function()
-        UI.AddTab("HAVOC", function(tab)
-            -- ESP Tab
-            local espSec = tab:Section("AI ESP", "Left", nil, 260)
-            espSec:Toggle("havoc_esp_enabled",  "Enabled",    DEF.havoc_esp_enabled)
-            espSec:Toggle("havoc_esp_box",      "Box",        DEF.havoc_esp_box)
-            espSec:Toggle("havoc_esp_name",     "Name",       DEF.havoc_esp_name)
-            espSec:Toggle("havoc_esp_distance", "Distance",   DEF.havoc_esp_distance)
-            espSec:Toggle("havoc_esp_tracer",   "Tracers",    DEF.havoc_esp_tracer)
-            espSec:SliderInt("havoc_esp_dist_max",    "Max Distance",      50, 3000, DEF.havoc_esp_dist_max)
-            espSec:SliderInt("havoc_esp_update_rate", "Update Rate (fps)",  5,   60, DEF.havoc_esp_update_rate)
-            espSec:ColorPicker("havoc_esp_boxcol", "Box Color", 255 / 255, 80 / 255, 80 / 255)
+        UI.AddTab("HAVOC ESP", function(tab)
+            -- Aimbot Section
+            local aim_sec = tab:Section("Aimbot", "Left", {"Main", "Visuals"})
+            
+            if aim_sec.page == 0 then
+                aim_sec:Toggle("havoc_aimbot_enabled", "Enable Entity Aimbot", false)
+                aim_sec:Combo("havoc_aimbot_bone", "Aimbot Bone", {"Head", "Torso"}, 0)
+                aim_sec:Combo("havoc_aimbot_target_type", "Target Type", {"Closest To Crosshair", "Closest Distance"}, 0)
+                aim_sec:SliderInt("havoc_aimbot_fov", "FOV", 10, 500, 150)
+                aim_sec:SliderInt("havoc_aimbot_max_distance", "Max Distance", 0, 3000, 3000)
+            elseif aim_sec.page == 1 then
+                aim_sec:Toggle("havoc_aimbot_draw_fov", "Draw FOV Circle", true)
+                aim_sec:Toggle("havoc_aimbot_target_line", "Target Line", false)
+            end
 
-            local visSec = tab:Section("Visuals", "Right", nil, 260)
-            visSec:Toggle("havoc_nofog", "No Fog", DEF.havoc_nofog)
+            -- Entity Visuals Section
+            local entity_sec = tab:Section("Entity Visuals", "Right")
+            entity_sec:Toggle("havoc_entity_enabled", "Enable Entity Visuals", true)
+            entity_sec:Toggle("havoc_entity_box", "Enable Box", true)
+            entity_sec:Toggle("havoc_entity_name", "Enable Name", true)
+            entity_sec:Toggle("havoc_entity_distance", "Enable Distance", true)
+            entity_sec:Toggle("havoc_entity_held_item", "Enable Held Item", true)
+            entity_sec:Toggle("havoc_entity_health_bar", "Enable Health Bar", true)
+            entity_sec:Toggle("havoc_entity_health_text", "Enable Health Text", true)
+            entity_sec:Toggle("havoc_entity_skeleton", "Enable Skeleton", false)
+            entity_sec:Toggle("havoc_entity_hide_dead", "Hide Dead Entities", true)
+            entity_sec:SliderInt("havoc_entity_max_distance", "Max Render Distance", 0, 3000, 3000)
 
-            -- Aimbot Tab
-            local aimSec = tab:Section("Aimbot", "Left")
-            aimSec:Toggle("aim_enabled", "Enabled", DEF.aim_enabled)
-            local aimKb = aimSec:Keybind("aim_kb", 0x46, "hold")  -- F key
-            aimSec:SliderInt("aim_fov", "FOV", 10, 500, DEF.aim_fov)
-            aimSec:SliderFloat("aim_smooth", "Smoothing", 0.01, 1.0, DEF.aim_smooth, "%.2f")
+            -- Loot Section
+            local loot_sec = tab:Section("Loot Visuals", "Left", nil, 400)
+            loot_sec:Toggle("havoc_loot_enabled", "Enable Loot Visuals", true)
+            for i = 1, #LOOT_TYPES do
+                local entry = LOOT_TYPES[i]
+                loot_sec:Toggle(entry.key, "Enable " .. entry.display, true)
+            end
+            loot_sec:Toggle(LOOT_FALLBACK.key, "Enable " .. LOOT_FALLBACK.display, true)
+            loot_sec:Toggle(BODY_BAG_TYPE.key, "Enable " .. BODY_BAG_TYPE.display, true)
 
-            local tgtSec = tab:Section("Target", "Right")
-            tgtSec:Combo("aim_hitbox", "Hitbox", {"Head", "Torso", "Nearest"}, DEF.aim_hitbox)
-            tgtSec:Toggle("aim_vis_check", "Vis Check", DEF.aim_vis_check)
+            -- Loot Options Section
+            local loot_opts = tab:Section("Loot Options", "Right")
+            loot_opts:Toggle("havoc_loot_distance", "Show Distance", true)
+            loot_opts:Combo("havoc_loot_distance_pos", "Distance Position", {"Same Line", "Below Name", "Left Of Name", "Right Of Name"}, 0)
+            loot_opts:Toggle("havoc_loot_marker", "Show Position Marker", true)
+            loot_opts:Combo("havoc_loot_filter", "Loot Filter", {"Show All", "Show Locked Only", "Show Unlocked Only", "Show Opened Only", "Show Unopened Only"}, 0)
+            loot_opts:SliderInt("havoc_loot_max_distance", "Max Render Distance", 0, 5000, 5000)
         end)
     end)
 end
 
-local espItems = {}
-local snap = { box = true, name = true, dist = true, tracer = false, boxCol = BOX_COL_DEF }
-local lastBuild = 0
+-- ============================================================================
+-- Main Loop
+-- ============================================================================
 
-local function rebuildItems()
-    snap.box    = uiGet("havoc_esp_box",      DEF.havoc_esp_box)
-    snap.name   = uiGet("havoc_esp_name",     DEF.havoc_esp_name)
-    snap.dist   = uiGet("havoc_esp_distance", DEF.havoc_esp_distance)
-    snap.tracer = uiGet("havoc_esp_tracer",   DEF.havoc_esp_tracer)
-    snap.boxCol = uiColor("havoc_esp_boxcol", BOX_COL_DEF)
+local aimbot_thread_id = nil
 
-    local camP    = getEyePos()
-    local maxDist = uiGet("havoc_esp_dist_max", DEF.havoc_esp_dist_max)
+local function main_loop()
+    refresh_entity_cache()
+    refresh_loot_cache()
+    refresh_loot_live()
 
-    local out = {}
-    for _, e in ipairs(getCharacters()) do
-        local ok, rootPos = pcall(function() return e.hrp.Position end)
-        if ok and rootPos then
-            local d = camP and (camP - rootPos).Magnitude or nil
-            if not (d and d > maxDist) then
-                out[#out + 1] = {
-                    part     = e.hrp,
-                    name     = e.model.Name,
-                    distText = d and string.format("%dm", math.floor(d)) or nil,
-                }
-                if #out >= MAX_SLOTS then break end
-            end
-        end
-    end
-    espItems = out
-end
+    local cam_pos = Camera.Position
 
--- Aimbot Functions
-local lastMousePos = Vector2.new(0, 0)
-local aimDebug = false
+    run_entity_visuals(cam_pos)
+    run_loot_visuals(cam_pos)
+    draw_aimbot_visuals()
 
-local function isVisible(part)
-    local camP = Camera.Position
-    local rayOrigin = camP
-    local rayDir = (part.Position - camP).Unit
-    
-    local rayResult = workspace:FindPartOnRay(Ray.new(rayOrigin, rayDir * 5000))
-    return rayResult and (rayResult.Parent == part.Parent or rayResult == part)
-end
-
-local function getAimbotTarget()
-    if not uiGet("aim_enabled", DEF.aim_enabled) then return nil end
-    
-    local fov = uiGet("aim_fov", DEF.aim_fov)
-    local visCheck = uiGet("aim_vis_check", DEF.aim_vis_check)
-    
-    local bestTarget = nil
-    local bestDist = fov
-    local centerX = Camera.ViewportSize.X / 2
-    local centerY = Camera.ViewportSize.Y / 2
-    
-    local debugMsg = string.format("[AIM] espItems=%d, fov=%d, visCheck=%s, center=(%d,%d)", 
-        #espItems, fov, tostring(visCheck), centerX, centerY)
-    
-    for _, item in ipairs(espItems) do
-        local ok, pos = pcall(function() return item.part.Position end)
-        if ok and pos then
-            local screenPos, onScreen = worldToScreen(pos)
-            if onScreen then
-                local dx = screenPos.X - centerX
-                local dy = screenPos.Y - centerY
-                local dist = math.sqrt(dx * dx + dy * dy)
-                
-                local visOk = true
-                if visCheck then
-                    visOk = isVisible(item.part)
-                end
-                
-                if aimDebug then
-                    debugMsg = debugMsg .. string.format("\n  [%s] screen=(%.0f,%.0f) dist=%.1f visible=%s", 
-                        item.name, screenPos.X, screenPos.Y, dist, tostring(visOk))
-                end
-                
-                if dist < bestDist and visOk then
-                    bestTarget = item
-                    bestDist = dist
-                end
-            end
-        end
-    end
-    
-    if aimDebug then
-        print(debugMsg)
-        print(string.format("[AIM] best target: %s (dist=%.1f)", 
-            bestTarget and bestTarget.name or "nil", bestDist))
-    end
-    
-    return bestTarget
-end
-
-local currentTarget = nil
-local function aimAt(target)
-    if not target then 
-        currentTarget = nil
-        return 
-    end
-    
-    if currentTarget ~= target then
-        currentTarget = target
-        if aimDebug then
-            print("[AIM] locked onto: " .. target.name)
-        end
-    end
-    
-    local smooth = uiGet("aim_smooth", DEF.aim_smooth)
-    local hitboxIdx = uiGet("aim_hitbox", DEF.aim_hitbox)
-    
-    -- Pick hitbox
-    local targetPart = target.part
-    if hitboxIdx == 0 then  -- Head
-        targetPart = target.part.Parent:FindFirstChild("Head") or target.part
-    elseif hitboxIdx == 1 then  -- Torso
-        targetPart = target.part
-    end
-    -- hitboxIdx == 2 is already "nearest" (target.part)
-    
-    local targetPos = targetPart.Position
-    local screenPos, onScreen = worldToScreen(targetPos)
-    
-    if not onScreen then return end
-    
-    -- Smooth lerp towards target
-    local currentPos = lastMousePos
-    local newX = currentPos.X + (screenPos.X - currentPos.X) * smooth
-    local newY = currentPos.Y + (screenPos.Y - currentPos.Y) * smooth
-    
-    lastMousePos = Vector2.new(newX, newY)
-    
-    if aimDebug then
-        print(string.format("[AIM] moving mouse to (%.0f, %.0f)", newX, newY))
-    end
-    
-    if mousemoveabs then
-        mousemoveabs(math.floor(newX), math.floor(newY))
+    local aimbot_enabled = UI.GetValue("havoc_aimbot_enabled")
+    if aimbot_enabled and not aimbot_thread_id then
+        aimbot_thread_id = RunService.RenderStepped:Connect(aimbot_tick)
+    elseif not aimbot_enabled and aimbot_thread_id then
+        aimbot_thread_id:Disconnect()
+        aimbot_thread_id = nil
     end
 end
 
-local lastDrawn = 0
-local dbgClock  = os.clock()
+RunService.RenderStepped:Connect(main_loop)
 
-renderConn = RunService.RenderStepped:Connect(function()
-    if not running then return end
-
-    local noFog = uiGet("havoc_nofog", DEF.havoc_nofog)
-    if noFog then
-        applyNoFog()
-    elseif lastNoFog then
-        restoreFog()
-    end
-    lastNoFog = noFog
-
-    if not uiGet("havoc_esp_enabled", DEF.havoc_esp_enabled) then
-        for i = 1, lastDrawn do hideSlot(slots[i]) end
-        lastDrawn = 0
-    else
-        local now  = os.clock()
-        local rate = uiGet("havoc_esp_update_rate", DEF.havoc_esp_update_rate)
-        if (now - lastBuild) >= (1 / math.max(1, rate)) then
-            lastBuild = now
-            rebuildItems()
-        end
-
-        local vp   = Camera.ViewportSize
-        local slot = 0
-
-        for _, it in ipairs(espItems) do
-            if slot >= MAX_SLOTS then break end
-
-            local ok, rootPos = pcall(function() return it.part.Position end)
-            if ok and rootPos then
-                local topPos, topOn = worldToScreen(rootPos + V3_HEAD)
-                local botPos, botOn = worldToScreen(rootPos - V3_FOOT)
-                if topOn and botOn then
-                    slot = slot + 1
-                    local s = slots[slot]
-                    hideSlot(s)
-
-                    local height = math.abs(botPos.Y - topPos.Y)
-                    if height < 1 then height = 1 end
-                    local width = height * 0.5
-                    local boxX  = topPos.X - width * 0.5
-                    local boxY  = topPos.Y
-
-                    if snap.box then
-                        drawBox(s, boxX, boxY, width, height, snap.boxCol)
-                    end
-
-                    if snap.name then
-                        s.name.Text     = it.name
-                        s.name.Position = Vector2.new(topPos.X, boxY - TEXT_SIZE - 2)
-                        s.name.Color    = NAME_COL
-                        s.name.Visible  = true
-                    end
-
-                    if snap.dist and it.distText then
-                        s.dist.Text     = it.distText
-                        s.dist.Position = Vector2.new(topPos.X, boxY + height + 2)
-                        s.dist.Color    = DIST_COL
-                        s.dist.Visible  = true
-                    end
-
-                    if snap.tracer then
-                        s.tracer.From    = Vector2.new(vp.X * 0.5, vp.Y)
-                        s.tracer.To      = Vector2.new(topPos.X, boxY + height)
-                        s.tracer.Color   = TRACER_COL
-                        s.tracer.Visible = true
-                    end
-                end
-            end
-        end
-
-        for i = slot + 1, lastDrawn do hideSlot(slots[i]) end
-        lastDrawn = slot
-
-        if DEBUG and (now - dbgClock) >= 1 then
-            dbgClock = now
-            print(string.format("[HAVOC ESP] items=%d drawn=%d", #espItems, slot))
-        end
-    end
-
-    -- Aimbot
-    if uiGet("aim_enabled", DEF.aim_enabled) then
-        local aimKbActive = uiGet("aim_kb", false)
-        if aimKbActive then
-            local target = getAimbotTarget()
-            if target then
-                aimAt(target)
-            end
-        end
-    end
-end)
-
-print("[HAVOC AI ESP + AIMBOT] loaded and synchronized.")
+print("[HAVOC ESP + AIMBOT + LOOT] Loaded successfully!")
