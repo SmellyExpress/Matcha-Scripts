@@ -363,12 +363,12 @@ local Keys = {
     "aimWeight",
 }
 
--- Find the cache ONCE at script startup instead of every frame
+-- SCAN ONCE: Run getgc out here so it never loops or crashes performance
 local WeaponCache = getgc(Keys)
 
 local function update_weapon_mods()
-    -- Ensure the cache was successfully found before attempting to modify it
-    if not WeaponCache then return end
+    -- Safety check if garbage collector scanning failed or returned empty
+    if not WeaponCache or #WeaponCache == 0 then return end
 
     -- Check UI Toggle States
     local no_recoil = UI.GetValue("havoc_no_recoil")
@@ -376,23 +376,33 @@ local function update_weapon_mods()
     local no_sway   = UI.GetValue("havoc_no_sway")
     local fast_vel  = UI.GetValue("havoc_fast_vel")
 
-    applygc(WeaponCache, {
-        -- Recoil
-        vPunchBase = no_recoil and 0 or nil, 
-        hPunchBase = no_recoil and 0 or nil,
-        
-        -- Spread
-        spreadReduce = no_spread and 100 or nil,
-        spread       = no_spread and Spread or nil,
-        
-        -- Velocity
-        vel          = fast_vel and 100000 or nil,
-        
-        -- Sway / Weight
-        weight       = no_sway and 0 or nil,
-        aimWeight    = no_sway and 0 or nil,
-        unAimWeight  = no_sway and 0 or nil,
-    })
+    -- Construct the payload dynamically to avoid passing damaging 'nil' values
+    local mods_to_apply = {}
+
+    if no_recoil then
+        mods_to_apply["vPunchBase"] = 0
+        mods_to_apply["hPunchBase"] = 0
+    end
+
+    if no_spread then
+        mods_to_apply["spreadReduce"] = 100
+        mods_to_apply["spread"] = Spread
+    end
+
+    if fast_vel then
+        mods_to_apply["vel"] = 100000
+    end
+
+    if no_sway then
+        mods_to_apply["weight"] = 0
+        mods_to_apply["aimWeight"] = 0
+        mods_to_apply["unAimWeight"] = 0
+    end
+
+    -- Only invoke applygc if at least one checkbox modifier is active
+    if next(mods_to_apply) ~= nil then
+        applygc(WeaponCache, mods_to_apply)
+    end
 end
 
 -- ============================================================================
@@ -408,9 +418,9 @@ local function main_loop()
 	local cam_pos = Camera.Position
 	run_loot_visuals(cam_pos)
 	
-	-- Throttle the modifications check to run every 0.5 seconds instead of every frame
+	-- Throttle the updates slightly so it isn't hammering memory 60+ times a second
 	local now = os.clock()
-	if (now - last_mod_update) > 0.5 then
+	if (now - last_mod_update) > 0.3 then
 		last_mod_update = now
 		pcall(update_weapon_mods)
 	end
