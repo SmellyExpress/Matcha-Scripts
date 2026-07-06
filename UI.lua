@@ -2,7 +2,6 @@ local RunService  = game:GetService("RunService")
 local Players     = game:GetService("Players")
 local Lighting    = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
-local GuiService  = game:GetService("GuiService")
 local Camera      = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
@@ -17,13 +16,6 @@ local DEF = {
     havoc_esp_distance    = true,
     havoc_esp_tracer      = false,
     havoc_nofog           = false,
-}
-
-local AIM_DEF = {
-    enabled  = false,
-    fov      = 180,
-    smooth   = 6.0,
-    dist_max = 1500,
 }
 
 local BOX_COL_DEF = Color3.fromRGB(255, 80, 80)
@@ -246,6 +238,7 @@ local function getEyePos()
     return nil
 end
 
+-- Re-purposed recursive collection function that enforces active player blacklisting
 local function collectFrom(inst, myChar, playerNames, out, depth)
     if depth > 8 then return end
     local ok, kids = pcall(function() return inst:GetChildren() end)
@@ -284,6 +277,7 @@ local function getCharacters()
     if (now - charStamp) < CHAR_TTL then return charCache end
     charStamp = now
 
+    -- Dynamically generate lookup map for real player identities
     local playerNames = {}
     for _, p in ipairs(Players:GetPlayers()) do
         playerNames[p.Name] = true
@@ -302,6 +296,136 @@ if typeof(UI) == "table" and UI.AddTab then
     pcall(function()
         UI.AddTab("HAVOC ESP", function(tab)
             local sec = tab:Section("AI ESP", "Left", nil, 260)
-            sec:Toggle("havoc_esp_enabled",  "Enabled",     DEF.havoc_esp_enabled)
-            sec:Toggle("havoc_esp_box",      "Box",         DEF.havoc_esp_box)
-            sec:Toggle("havoc_esp_name",     "Name",        DEF.havoc_esp_name)
+            sec:Toggle("havoc_esp_enabled",  "Enabled",    DEF.havoc_esp_enabled)
+            sec:Toggle("havoc_esp_box",      "Box",        DEF.havoc_esp_box)
+            sec:Toggle("havoc_esp_name",     "Name",       DEF.havoc_esp_name)
+            sec:Toggle("havoc_esp_distance", "Distance",   DEF.havoc_esp_distance)
+            sec:Toggle("havoc_esp_tracer",   "Tracers",    DEF.havoc_esp_tracer)
+            sec:SliderInt("havoc_esp_dist_max",    "Max Distance",      50, 3000, DEF.havoc_esp_dist_max)
+            sec:SliderInt("havoc_esp_update_rate", "Update Rate (fps)",  5,   60, DEF.havoc_esp_update_rate)
+            sec:ColorPicker("havoc_esp_boxcol", "Box Color", 255 / 255, 80 / 255, 80 / 255)
+
+            local vis = tab:Section("Visuals", "Right", nil, 260)
+            vis:Toggle("havoc_nofog", "No Fog", DEF.havoc_nofog)
+        end)
+    end)
+end
+
+local espItems = {}
+local snap = { box = true, name = true, dist = true, tracer = false, boxCol = BOX_COL_DEF }
+local lastBuild = 0
+
+local function rebuildItems()
+    snap.box    = uiGet("havoc_esp_box",      DEF.havoc_esp_box)
+    snap.name   = uiGet("havoc_esp_name",     DEF.havoc_esp_name)
+    snap.dist   = uiGet("havoc_esp_distance", DEF.havoc_esp_distance)
+    snap.tracer = uiGet("havoc_esp_tracer",   DEF.havoc_esp_tracer)
+    snap.boxCol = uiColor("havoc_esp_boxcol", BOX_COL_DEF)
+
+    local camP    = getEyePos()
+    local maxDist = uiGet("havoc_esp_dist_max", DEF.havoc_esp_dist_max)
+
+    local out = {}
+    for _, e in ipairs(getCharacters()) do
+        local ok, rootPos = pcall(function() return e.hrp.Position end)
+        if ok and rootPos then
+            local d = camP and (camP - rootPos).Magnitude or nil
+            if not (d and d > maxDist) then
+                out[#out + 1] = {
+                    part     = e.hrp,
+                    name     = e.model.Name,
+                    distText = d and string.format("%dm", math.floor(d)) or nil,
+                }
+                if #out >= MAX_SLOTS then break end
+            end
+        end
+    end
+    espItems = out
+end
+
+local lastDrawn = 0
+local dbgClock  = os.clock()
+
+renderConn = RunService.RenderStepped:Connect(function()
+    if not running then return end
+
+    local noFog = uiGet("havoc_nofog", DEF.havoc_nofog)
+    if noFog then
+        applyNoFog()
+    elseif lastNoFog then
+        restoreFog()
+    end
+    lastNoFog = noFog
+
+    if not uiGet("havoc_esp_enabled", DEF.havoc_esp_enabled) then
+        for i = 1, lastDrawn do hideSlot(slots[i]) end
+        lastDrawn = 0
+        return
+    end
+
+    local now  = os.clock()
+    local rate = uiGet("havoc_esp_update_rate", DEF.havoc_esp_update_rate)
+    if (now - lastBuild) >= (1 / math.max(1, rate)) then
+        lastBuild = now
+        rebuildItems()
+    end
+
+    local vp   = Camera.ViewportSize
+    local slot = 0
+
+    for _, it in ipairs(espItems) do
+        if slot >= MAX_SLOTS then break end
+
+        local ok, rootPos = pcall(function() return it.part.Position end)
+        if ok and rootPos then
+            local topPos, topOn = worldToScreen(rootPos + V3_HEAD)
+            local botPos, botOn = worldToScreen(rootPos - V3_FOOT)
+            if topOn and botOn then
+                slot = slot + 1
+                local s = slots[slot]
+                hideSlot(s)
+
+                local height = math.abs(botPos.Y - topPos.Y)
+                if height < 1 then height = 1 end
+                local width = height * 0.5
+                local boxX  = topPos.X - width * 0.5
+                local boxY  = topPos.Y
+
+                if snap.box then
+                    drawBox(s, boxX, boxY, width, height, snap.boxCol)
+                end
+
+                if snap.name then
+                    s.name.Text     = it.name
+                    s.name.Position = Vector2.new(topPos.X, boxY - TEXT_SIZE - 2)
+                    s.name.Color    = NAME_COL
+                    s.name.Visible  = true
+                end
+
+                if snap.dist and it.distText then
+                    s.dist.Text     = it.distText
+                    s.dist.Position = Vector2.new(topPos.X, boxY + height + 2)
+                    s.dist.Color    = DIST_COL
+                    s.dist.Visible  = true
+                end
+
+                if snap.tracer then
+                    s.tracer.From    = Vector2.new(vp.X * 0.5, vp.Y)
+                    s.tracer.To      = Vector2.new(topPos.X, boxY + height)
+                    s.tracer.Color   = TRACER_COL
+                    s.tracer.Visible = true
+                end
+            end
+        end
+    end
+
+    for i = slot + 1, lastDrawn do hideSlot(slots[i]) end
+    lastDrawn = slot
+
+    if DEBUG and (now - dbgClock) >= 1 then
+        dbgClock = now
+        print(string.format("[HAVOC ESP] items=%d drawn=%d", #espItems, slot))
+    end
+end)
+
+print("[HAVOC AI ESP] loaded and synchronized.")
