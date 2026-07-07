@@ -108,7 +108,7 @@ local function update_toggle()
 end
 
 local RANK_THRESHOLDS = {
-	{ min = 10400, name = "ArchNemesis",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/ArchnemesisRank.png" },
+	{ min = 10400, name = "ArchNemesis",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Archnemesis.png" },
 	{ min = 3600, name = "Nemesis",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/NemisisRank.png" },
 	{ min = 3000, name = "Onyx",      icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/OnyxRank.png" },
 	{ min = 2400, name = "Diamond",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/DiamondRank.png" },
