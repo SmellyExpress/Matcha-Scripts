@@ -2,10 +2,6 @@ local RunService = game:GetService("RunService")
 local Players    = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- ============================================================================
--- Config
--- ============================================================================
-
 local PANEL_WIDTH = 220
 local ROW_HEIGHT = 18
 local PADDING = 8
@@ -16,17 +12,12 @@ local BG_COLOR = Color3.fromRGB(20, 20, 24)
 local TITLE_COLOR = Color3.fromRGB(255, 255, 255)
 local NAME_COLOR = Color3.fromRGB(220, 220, 220)
 
-local TOGGLE_KEY = 0x23 -- VK_END
+local TOGGLE_KEY = 0x23
 
--- Panel position (mutable - moves when dragged)
 local panel_x = 20
 local panel_y = 20
 
 local panel_visible = true
-
--- ============================================================================
--- Drawing Objects
--- ============================================================================
 
 local background = Drawing.new("Square")
 background.Filled = true
@@ -37,7 +28,7 @@ background.Size = Vector2.new(PANEL_WIDTH, 40)
 background.Visible = panel_visible
 
 local title = Drawing.new("Text")
-title.Text = "Players (drag me)"
+title.Text = "Players"
 title.Size = TITLE_SIZE
 title.Color = TITLE_COLOR
 title.Font = Drawing.Fonts.SystemBold
@@ -70,10 +61,6 @@ for i = 1, MAX_ROWS do
 	row_pool[i] = new_row()
 end
 
--- ============================================================================
--- Dragging
--- ============================================================================
-
 local dragging = false
 local drag_offset_x, drag_offset_y = 0, 0
 local last_mouse_x, last_mouse_y = 0, 0
@@ -84,7 +71,6 @@ local function get_mouse_pos()
 end
 
 local function point_in_titlebar(mx, my)
-	-- title bar area = top strip of the panel (padding + title height)
 	local titlebar_height = PADDING * 2 + TITLE_SIZE
 	return mx >= panel_x and mx <= panel_x + PANEL_WIDTH
 		and my >= panel_y and my <= panel_y + titlebar_height
@@ -95,14 +81,12 @@ local function update_drag()
 
 	if ismouse1pressed() then
 		if not dragging then
-			-- just pressed - check if we're grabbing the titlebar
 			if point_in_titlebar(mx, my) then
 				dragging = true
 				drag_offset_x = mx - panel_x
 				drag_offset_y = my - panel_y
 			end
 		else
-			-- already dragging - follow the mouse
 			panel_x = mx - drag_offset_x
 			panel_y = my - drag_offset_y
 		end
@@ -112,10 +96,6 @@ local function update_drag()
 
 	last_mouse_x, last_mouse_y = mx, my
 end
-
--- ============================================================================
--- Toggle (END key)
--- ============================================================================
 
 local toggle_key_was_down = false
 
@@ -127,20 +107,15 @@ local function update_toggle()
 	toggle_key_was_down = is_down
 end
 
--- ============================================================================
--- Rank Mapping
--- ============================================================================
-
--- Fill in real hosted image URLs for each rank icon (direct image links,
--- e.g. imgur i.imgur.com/xxxx.png or your own CDN - must be a direct file url)
 local RANK_THRESHOLDS = {
-	{ min = 3600, name = "Nemesis",   icon_url = "https://example.com/icons/nemesis.png" },
-	{ min = 3000, name = "Onyx",      icon_url = "https://example.com/icons/onyx.png" },
-	{ min = 2400, name = "Diamond",   icon_url = "https://example.com/icons/diamond.png" },
-	{ min = 1800, name = "Platinum",  icon_url = "https://example.com/icons/platinum.png" },
-	{ min = 1200, name = "Gold",      icon_url = "https://example.com/icons/gold.png" },
-	{ min = 600,  name = "Silver",    icon_url = "https://example.com/icons/silver.png" },
-	{ min = 0,    name = "Bronze",    icon_url = "https://example.com/icons/bronze.png" },
+	{ min = 10400, name = "ArchNemesis",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/ArchnemesisRank.png" },
+	{ min = 3600, name = "Nemesis",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/NemisisRank.png" },
+	{ min = 3000, name = "Onyx",      icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/OnyxRank.png" },
+	{ min = 2400, name = "Diamond",   icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/DiamondRank.png" },
+	{ min = 1800, name = "Platinum",  icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/PlatinumRank.png" },
+	{ min = 1200, name = "Gold",      icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/GoldRank.png" },
+	{ min = 600,  name = "Silver",    icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/SilverRank.png" },
+	{ min = 0,    name = "Bronze",    icon_url = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/BronzeRank.png" },
 }
 
 local function elo_to_rank_entry(elo)
@@ -153,11 +128,7 @@ local function elo_to_rank_entry(elo)
 	return RANK_THRESHOLDS[#RANK_THRESHOLDS]
 end
 
--- ============================================================================
--- Icon Image Cache (download once per rank, reuse the binary data forever)
--- ============================================================================
-
-local icon_data_cache = {}   -- rank name -> binary image data (or false if failed)
+local icon_data_cache = {}
 local icon_fetch_in_progress = {}
 
 local function looks_like_image(data)
@@ -178,7 +149,7 @@ local function get_icon_data(rank_entry)
 	end
 
 	if icon_fetch_in_progress[rank_entry.name] then
-		return nil -- still downloading, don't block the frame
+		return nil
 	end
 
 	icon_fetch_in_progress[rank_entry.name] = true
@@ -191,7 +162,7 @@ local function get_icon_data(rank_entry)
 		if ok and looks_like_image(data) then
 			icon_data_cache[rank_entry.name] = data
 		else
-			icon_data_cache[rank_entry.name] = false -- mark failed, don't retry every frame
+			icon_data_cache[rank_entry.name] = false
 			warn("[Rivals PlayerList] Failed to load a valid image for rank: " .. rank_entry.name .. " (check the icon_url)")
 		end
 
@@ -200,10 +171,6 @@ local function get_icon_data(rank_entry)
 
 	return nil
 end
-
--- ============================================================================
--- Player List Logic
--- ============================================================================
 
 local function get_elo(player)
 	local ok, stats = pcall(function() return player:FindFirstChild("CustomLeaderstats") end)
@@ -230,7 +197,6 @@ local function update_player_list()
 		if elo_value ~= nil then
 			local rank_entry = elo_to_rank_entry(elo_value)
 
-			-- only re-fetch/re-assign icon data when the rank actually changes
 			if row.loaded_rank ~= rank_entry.name then
 				local data = get_icon_data(rank_entry)
 				if data then
@@ -239,7 +205,6 @@ local function update_player_list()
 					row.icon.Visible = panel_visible
 					row.text.Text = player.Name
 				else
-					-- icon not ready (still downloading or failed) - show rank as text instead
 					row.icon.Visible = false
 					row.text.Text = player.Name .. "  [" .. rank_entry.name .. "]"
 				end
@@ -267,10 +232,6 @@ local function update_player_list()
 	return row_count
 end
 
--- ============================================================================
--- Position/Visibility Sync (every frame - cheap, just Vector2 assignment)
--- ============================================================================
-
 local function sync_positions(row_count)
 	background.Position = Vector2.new(panel_x, panel_y)
 	background.Visible = panel_visible
@@ -288,8 +249,6 @@ local function sync_positions(row_count)
 		local text_x = has_icon and (panel_x + PADDING + ICON_SIZE + 6) or (panel_x + PADDING)
 		row.text.Position = Vector2.new(text_x, row_y + (ICON_SIZE - TEXT_SIZE) / 2)
 
-		-- keep visibility in sync with the panel toggle every frame,
-		-- but never force an icon visible if it hasn't loaded yet
 		row.text.Visible = panel_visible and row.text.Text ~= nil and row.text.Text ~= ""
 		row.icon.Visible = panel_visible and has_icon
 	end
@@ -299,10 +258,6 @@ local function sync_positions(row_count)
 		row_pool[i].icon.Visible = false
 	end
 end
-
--- ============================================================================
--- Main Loop
--- ============================================================================
 
 local PLAYERLIST_UPDATE_INTERVAL = 0.5
 local last_update = 0
@@ -318,11 +273,9 @@ local function main_loop()
 		last_row_count = update_player_list()
 	end
 
-	-- position/visibility needs to update every frame for smooth dragging
-	-- and instant toggle response, independent of the slower data refresh
 	sync_positions(last_row_count)
 end
 
 RunService.RenderStepped:Connect(main_loop)
 
-print("[Rivals PlayerList] Loaded - drag the title bar to move, press END to toggle!")
+print("[Rivals PlayerList] Loaded - Press END to toggle!")
