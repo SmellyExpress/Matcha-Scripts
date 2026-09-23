@@ -14,18 +14,42 @@ local RunService = game:GetService("RunService")
 -- ============================================================
 -- BUMP THIS whenever you reload and the UI truncates to "Enabled"
 -- ============================================================
-local PREFIX = "di8_"
+local PREFIX = "di9_"
 
 local TRIPMINE_IMAGE_URL =
 	"https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/SubspaceTripmine.png"
+
+-- Add these once you upload the PNGs to your repo:
+-- local SATCHEL_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Satchel.png"
+-- local GRENADE_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Grenade.png"
+-- local FLASHBANG_IMAGE_URL = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Flashbang.png"
+-- local MOLOTOV_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Molotov.png"
 
 local ITEM_TYPES = {
 	["SubspaceTripmineHitbox"] = {
 		display = "tripmine",
 		imageUrl = TRIPMINE_IMAGE_URL,
 	},
-	-- ["GrenadeHitbox"]   = { display = "grenade",   imageUrl = "..." },
-	-- ["FlashbangHitbox"] = { display = "flashbang", imageUrl = "..." },
+	["FakeSatchelModel"] = {
+		display = "satchel",
+		imageUrl = nil,                 -- set to SATCHEL_IMAGE_URL once uploaded
+		preferredChild = "SatchelEntityHitbox",
+	},
+	["Flashbang"] = {
+		display = "flashbang",
+		imageUrl = nil,                 -- set to FLASHBANG_IMAGE_URL once uploaded
+		preferredChild = "Primary",
+	},
+	["Molotov"] = {
+		display = "molotov",
+		imageUrl = nil,                 -- set to MOLOTOV_IMAGE_URL once uploaded
+		preferredChild = "Primary",
+	},
+	["Grenade"] = {
+		display = "grenade",
+		imageUrl = nil,                 -- set to GRENADE_IMAGE_URL once uploaded
+		preferredChild = "Primary",
+	},
 }
 
 local drawings = { texts = {}, images = {} }
@@ -99,12 +123,19 @@ local function hasPosition(obj)
 	return typeof(obj.Position) == "Vector3"
 end
 
-local function resolvePart(instance)
+-- preferredChild lets each item type point at a specific part
+-- (e.g. SatchelEntityHitbox) instead of relying on child order.
+local function resolvePart(instance, preferredChild)
 	if hasPosition(instance) then
 		return instance
 	end
 
 	if instance.ClassName == "Model" then
+		if preferredChild then
+			local pref = instance:FindFirstChild(preferredChild)
+			if hasPosition(pref) then return pref end
+		end
+
 		local hb = instance:FindFirstChild("Hitbox")
 		if hasPosition(hb) then return hb end
 
@@ -125,7 +156,7 @@ local function rescanForItems()
 	for _, child in ipairs(Workspace:GetChildren()) do
 		local info = ITEM_TYPES[child.Name]
 		if info then
-			local part = resolvePart(child)
+			local part = resolvePart(child, info.preferredChild)
 			if hasPosition(part) and part.Parent then
 				table.insert(found, {
 					part = part,
