@@ -1,21 +1,43 @@
+-- Deployed Items ESP for Rivals
+-- Matcha VM quirks handled:
+--   * WorldToScreen is a plain global
+--   * Drawing Text uses .Size, not .FontSize
+--   * IsA("BasePart") broken -> use typeof(obj.Position) == "Vector3"
+--   * Workspace.DescendantAdded not implemented -> poll GetChildren()
+--   * Image.Data must be set ONCE per slot (setting every frame = crash)
+--   * Drawing objects are C-backed: cannot store arbitrary fields on them
+--   * UI widget IDs persist across reloads -> bump PREFIX if UI truncates
+
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
-local PREFIX = "di4_"
+-- ============================================================
+-- BUMP THIS whenever you reload and the UI truncates to "Enabled"
+-- ============================================================
+local PREFIX = "di8_"
 
-local NAME_MAPPING = {
-	["SubspaceTripmineHitbox"] = "Tripmine",
-	-- Add more when you find their runtime names:
-	-- ["GrenadeHitbox"] = "grenade",
-	-- ["FlashbangHitbox"] = "flashbang",
-	-- ["SatchelHitbox"] = "satchel",p
+local TRIPMINE_IMAGE_URL =
+	"https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/SubspaceTripmine.png"
+
+local ITEM_TYPES = {
+	["SubspaceTripmineHitbox"] = {
+		display = "tripmine",
+		imageUrl = TRIPMINE_IMAGE_URL,
+	},
+	-- ["GrenadeHitbox"]   = { display = "grenade",   imageUrl = "..." },
+	-- ["FlashbangHitbox"] = { display = "flashbang", imageUrl = "..." },
 }
 
-local drawings = { texts = {}, placeholders = {} }
+local drawings = { texts = {}, images = {} }
 local maxItems = 50
 local activeItems = {}
 local scanTimer = 0
 local SCAN_INTERVAL = 0.25
+
+-- Caches (parallel Lua tables, never attach fields to Drawing objects)
+local imageCache = {}    -- url -> raw binary string
+local slotLastUrl = {}   -- slotIndex -> url last set on this slot's Image
+local slotDataSet = {}   -- slotIndex -> true once .Data has been assigned
 
 local function initializeDrawingPool()
 	for i = 1, maxItems do
@@ -25,15 +47,51 @@ local function initializeDrawingPool()
 		t.Center = true
 		t.Color = Color3.fromRGB(255, 255, 255)
 
-		local s = Drawing.new("Square")
-		s.Visible = false
-		s.Filled = true
-		s.Thickness = 1
-		s.Color = Color3.fromRGB(0, 150, 255)
+		local img = Drawing.new("Image")
+		img.Visible = false
+		img.Size = Vector2.new(32, 32)
 
 		drawings.texts[i] = t
-		drawings.placeholders[i] = s
+		drawings.images[i] = img
+		slotDataSet[i] = false
 	end
+end
+
+local function getImageData(url)
+	if imageCache[url] then return imageCache[url] end
+
+	local ok, data = pcall(function() return game:HttpGet(url) end)
+	if ok and data and #data > 0 then
+		imageCache[url] = data
+		print("[image] loaded:", url, "(" .. #data .. " bytes)")
+		return data
+	end
+
+	warn("[image] failed:", url)
+	return nil
+end
+
+local function preloadImages()
+	for _, info in pairs(ITEM_TYPES) do
+		if info.imageUrl then
+			getImageData(info.imageUrl)
+		end
+	end
+end
+
+-- Assign .Data only when the URL changes for this slot.
+local function ensureSlotData(slotIndex, imgObj, url)
+	local data = getImageData(url)
+	if not data then return false end
+
+	if slotDataSet[slotIndex] and slotLastUrl[slotIndex] == url then
+		return true
+	end
+
+	imgObj.Data = data
+	slotLastUrl[slotIndex] = url
+	slotDataSet[slotIndex] = true
+	return true
 end
 
 local function hasPosition(obj)
@@ -65,10 +123,15 @@ local function rescanForItems()
 	local found = {}
 
 	for _, child in ipairs(Workspace:GetChildren()) do
-		if NAME_MAPPING[child.Name] then
+		local info = ITEM_TYPES[child.Name]
+		if info then
 			local part = resolvePart(child)
 			if hasPosition(part) and part.Parent then
-				table.insert(found, { part = part, name = NAME_MAPPING[child.Name] })
+				table.insert(found, {
+					part = part,
+					display = info.display,
+					imageUrl = info.imageUrl,
+				})
 				if #found >= maxItems then break end
 			end
 		end
@@ -80,38 +143,53 @@ end
 local function drawActiveItems()
 	for i = 1, maxItems do
 		local textObj = drawings.texts[i]
-		local phObj = drawings.placeholders[i]
+		local imgObj = drawings.images[i]
 		local entry = activeItems[i]
 
 		if not entry or not hasPosition(entry.part) or not entry.part.Parent then
 			textObj.Visible = false
-			phObj.Visible = false
+			imgObj.Visible = false
 		else
 			local pos = entry.part.Position
 			local screenPos, onScreen = WorldToScreen(pos)
 
-			if onScreen then
+			if not onScreen then
+				textObj.Visible = false
+				imgObj.Visible = false
+			else
+				-- Image size (used for both image placement and text offset)
+				local scale = UI.GetValue(PREFIX .. "image_scale")
+				local size = 32 * scale
+
+				-- Decide whether to show the image
+				local showImage = false
+				if UI.GetValue(PREFIX .. "image_enabled") and entry.imageUrl then
+					showImage = ensureSlotData(i, imgObj, entry.imageUrl)
+				end
+
+				-- Place image + determine text Y offset
+				local textYOffset
+				if showImage then
+					imgObj.Size = Vector2.new(size, size)
+					imgObj.Position = screenPos - Vector2.new(size / 2, size + 10)
+					imgObj.Visible = true
+
+					-- Text sits above the image's top edge (image offset + extra gap)
+					textYOffset = -(size + 10) - 20
+				else
+					imgObj.Visible = false
+					textYOffset = -30
+				end
+
+				-- Text
 				if UI.GetValue(PREFIX .. "text_enabled") then
-					textObj.Text = entry.name
+					textObj.Text = entry.display
 					textObj.Size = math.floor(14 * UI.GetValue(PREFIX .. "text_scale"))
-					textObj.Position = screenPos + Vector2.new(0, -30)
+					textObj.Position = screenPos + Vector2.new(0, textYOffset)
 					textObj.Visible = true
 				else
 					textObj.Visible = false
 				end
-
-				if UI.GetValue(PREFIX .. "image_enabled") then
-					local scale = UI.GetValue(PREFIX .. "image_scale")
-					local size = 24 * scale
-					phObj.Size = Vector2.new(size, size)
-					phObj.Position = screenPos - Vector2.new(size / 2, size + 10)
-					phObj.Visible = true
-				else
-					phObj.Visible = false
-				end
-			else
-				textObj.Visible = false
-				phObj.Visible = false
 			end
 		end
 	end
@@ -120,7 +198,7 @@ end
 local function hideAllDrawings()
 	for i = 1, maxItems do
 		drawings.texts[i].Visible = false
-		drawings.placeholders[i].Visible = false
+		drawings.images[i].Visible = false
 	end
 end
 
@@ -157,4 +235,5 @@ UI.AddTab("Deployed Items", function(tab)
 end)
 
 initializeDrawingPool()
+preloadImages()
 RunService.RenderStepped:Connect(onRenderStep)
