@@ -1,7 +1,7 @@
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
-local PREFIX = "di9_"
+local PREFIX = "di10_"
 
 local TRIPMINE_IMAGE_URL  = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/SubspaceTripmine.png"
 local SATCHEL_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Satchel.png"
@@ -42,9 +42,21 @@ local activeItems = {}
 local scanTimer = 0
 local SCAN_INTERVAL = 0.25
 
-local imageCache = {}    -- url -> raw binary string
-local slotLastUrl = {}   -- slotIndex -> url last set on this slot's Image
-local slotDataSet = {}   -- slotIndex -> true once .Data has been assigned
+local imageCache = {}
+local slotLastUrl = {}
+local slotDataSet = {}
+
+local function getBool(key, default)
+	local v = UI.GetValue(key)
+	if v == nil then return default end
+	return v
+end
+
+local function getNum(key, default)
+	local v = UI.GetValue(key)
+	if v == nil then return default end
+	return v
+end
 
 local function initializeDrawingPool()
 	for i = 1, maxItems do
@@ -70,11 +82,9 @@ local function getImageData(url)
 	local ok, data = pcall(function() return game:HttpGet(url) end)
 	if ok and data and #data > 0 then
 		imageCache[url] = data
-		print("[image] loaded:", url, "(" .. #data .. " bytes)")
 		return data
 	end
 
-	warn("[image] failed:", url)
 	return nil
 end
 
@@ -168,11 +178,11 @@ local function drawActiveItems()
 				textObj.Visible = false
 				imgObj.Visible = false
 			else
-				local scale = UI.GetValue(PREFIX .. "image_scale")
+				local scale = getNum(PREFIX .. "image_scale", 1.0)
 				local size = 32 * scale
 
 				local showImage = false
-				if UI.GetValue(PREFIX .. "image_enabled") and entry.imageUrl then
+				if getBool(PREFIX .. "image_enabled", true) and entry.imageUrl then
 					showImage = ensureSlotData(i, imgObj, entry.imageUrl)
 				end
 
@@ -181,16 +191,15 @@ local function drawActiveItems()
 					imgObj.Size = Vector2.new(size, size)
 					imgObj.Position = screenPos - Vector2.new(size / 2, size + 10)
 					imgObj.Visible = true
-
 					textYOffset = -(size + 10) - 20
 				else
 					imgObj.Visible = false
 					textYOffset = -30
 				end
 
-				if UI.GetValue(PREFIX .. "text_enabled") then
+				if getBool(PREFIX .. "text_enabled", true) then
 					textObj.Text = entry.display
-					textObj.Size = math.floor(14 * UI.GetValue(PREFIX .. "text_scale"))
+					textObj.Size = math.floor(14 * getNum(PREFIX .. "text_scale", 1.0))
 					textObj.Position = screenPos + Vector2.new(0, textYOffset)
 					textObj.Visible = true
 				else
@@ -209,7 +218,7 @@ local function hideAllDrawings()
 end
 
 local function onRenderStep(dt)
-	if not UI.GetValue(PREFIX .. "esp_enabled") then
+	if not getBool(PREFIX .. "esp_enabled", true) then
 		hideAllDrawings()
 		return
 	end
