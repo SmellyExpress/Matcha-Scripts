@@ -1,1 +1,160 @@
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
+local PREFIX = "di4_"
+
+local NAME_MAPPING = {
+	["SubspaceTripmineHitbox"] = "Tripmine",
+	-- Add more when you find their runtime names:
+	-- ["GrenadeHitbox"] = "grenade",
+	-- ["FlashbangHitbox"] = "flashbang",
+	-- ["SatchelHitbox"] = "satchel",p
+}
+
+local drawings = { texts = {}, placeholders = {} }
+local maxItems = 50
+local activeItems = {}
+local scanTimer = 0
+local SCAN_INTERVAL = 0.25
+
+local function initializeDrawingPool()
+	for i = 1, maxItems do
+		local t = Drawing.new("Text")
+		t.Visible = false
+		t.Outline = true
+		t.Center = true
+		t.Color = Color3.fromRGB(255, 255, 255)
+
+		local s = Drawing.new("Square")
+		s.Visible = false
+		s.Filled = true
+		s.Thickness = 1
+		s.Color = Color3.fromRGB(0, 150, 255)
+
+		drawings.texts[i] = t
+		drawings.placeholders[i] = s
+	end
+end
+
+local function hasPosition(obj)
+	if not obj then return false end
+	return typeof(obj.Position) == "Vector3"
+end
+
+local function resolvePart(instance)
+	if hasPosition(instance) then
+		return instance
+	end
+
+	if instance.ClassName == "Model" then
+		local hb = instance:FindFirstChild("Hitbox")
+		if hasPosition(hb) then return hb end
+
+		if hasPosition(instance.PrimaryPart) then
+			return instance.PrimaryPart
+		end
+
+		local any = instance:FindFirstChildWhichIsA("BasePart")
+		if hasPosition(any) then return any end
+	end
+
+	return nil
+end
+
+local function rescanForItems()
+	local found = {}
+
+	for _, child in ipairs(Workspace:GetChildren()) do
+		if NAME_MAPPING[child.Name] then
+			local part = resolvePart(child)
+			if hasPosition(part) and part.Parent then
+				table.insert(found, { part = part, name = NAME_MAPPING[child.Name] })
+				if #found >= maxItems then break end
+			end
+		end
+	end
+
+	activeItems = found
+end
+
+local function drawActiveItems()
+	for i = 1, maxItems do
+		local textObj = drawings.texts[i]
+		local phObj = drawings.placeholders[i]
+		local entry = activeItems[i]
+
+		if not entry or not hasPosition(entry.part) or not entry.part.Parent then
+			textObj.Visible = false
+			phObj.Visible = false
+		else
+			local pos = entry.part.Position
+			local screenPos, onScreen = WorldToScreen(pos)
+
+			if onScreen then
+				if UI.GetValue(PREFIX .. "text_enabled") then
+					textObj.Text = entry.name
+					textObj.Size = math.floor(14 * UI.GetValue(PREFIX .. "text_scale"))
+					textObj.Position = screenPos + Vector2.new(0, -30)
+					textObj.Visible = true
+				else
+					textObj.Visible = false
+				end
+
+				if UI.GetValue(PREFIX .. "image_enabled") then
+					local scale = UI.GetValue(PREFIX .. "image_scale")
+					local size = 24 * scale
+					phObj.Size = Vector2.new(size, size)
+					phObj.Position = screenPos - Vector2.new(size / 2, size + 10)
+					phObj.Visible = true
+				else
+					phObj.Visible = false
+				end
+			else
+				textObj.Visible = false
+				phObj.Visible = false
+			end
+		end
+	end
+end
+
+local function hideAllDrawings()
+	for i = 1, maxItems do
+		drawings.texts[i].Visible = false
+		drawings.placeholders[i].Visible = false
+	end
+end
+
+local function onRenderStep(dt)
+	if not UI.GetValue(PREFIX .. "esp_enabled") then
+		hideAllDrawings()
+		return
+	end
+
+	scanTimer += dt
+	if scanTimer >= SCAN_INTERVAL then
+		scanTimer = 0
+		rescanForItems()
+	end
+
+	drawActiveItems()
+end
+
+pcall(function() UI.RemoveTab("Deployed Items") end)
+
+UI.AddTab("Deployed Items", function(tab)
+	local main = tab:Section("Settings", "Left")
+
+	main:Toggle(PREFIX .. "esp_enabled", "Enabled", true)
+
+	main:Text("Text Settings")
+	main:Toggle(PREFIX .. "text_enabled", "Show Names", true)
+	main:SliderFloat(PREFIX .. "text_scale", "Text Scale", 0.5, 3.0, 1.0, "%.1f")
+
+	main:Spacing()
+	main:Text("Image Settings")
+	main:Toggle(PREFIX .. "image_enabled", "Show Images", true)
+	main:SliderFloat(PREFIX .. "image_scale", "Image Scale", 0.5, 3.0, 1.0, "%.1f")
+end)
+
+initializeDrawingPool()
+RunService.RenderStepped:Connect(onRenderStep)
