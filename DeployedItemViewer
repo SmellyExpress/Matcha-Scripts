@@ -1,29 +1,13 @@
--- Deployed Items ESP for Rivals
--- Matcha VM quirks handled:
---   * WorldToScreen is a plain global
---   * Drawing Text uses .Size, not .FontSize
---   * IsA("BasePart") broken -> use typeof(obj.Position) == "Vector3"
---   * Workspace.DescendantAdded not implemented -> poll GetChildren()
---   * Image.Data must be set ONCE per slot (setting every frame = crash)
---   * Drawing objects are C-backed: cannot store arbitrary fields on them
---   * UI widget IDs persist across reloads -> bump PREFIX if UI truncates
-
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
--- ============================================================
--- BUMP THIS whenever you reload and the UI truncates to "Enabled"
--- ============================================================
 local PREFIX = "di9_"
 
-local TRIPMINE_IMAGE_URL =
-	"https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/SubspaceTripmine.png"
-
--- Add these once you upload the PNGs to your repo:
--- local SATCHEL_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Satchel.png"
--- local GRENADE_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Grenade.png"
--- local FLASHBANG_IMAGE_URL = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Flashbang.png"
--- local MOLOTOV_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Molotov.png"
+local TRIPMINE_IMAGE_URL  = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/SubspaceTripmine.png"
+local SATCHEL_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Satchel.png"
+local GRENADE_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Grenade.png"
+local FLASHBANG_IMAGE_URL = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Flashbang.png"
+local MOLOTOV_IMAGE_URL   = "https://raw.githubusercontent.com/SmellyExpress/Matcha-Scripts/main/Molotov.png"
 
 local ITEM_TYPES = {
 	["SubspaceTripmineHitbox"] = {
@@ -32,22 +16,22 @@ local ITEM_TYPES = {
 	},
 	["FakeSatchelModel"] = {
 		display = "satchel",
-		imageUrl = nil,                 -- set to SATCHEL_IMAGE_URL once uploaded
+		imageUrl = SATCHEL_IMAGE_URL,
 		preferredChild = "SatchelEntityHitbox",
 	},
 	["Flashbang"] = {
 		display = "flashbang",
-		imageUrl = nil,                 -- set to FLASHBANG_IMAGE_URL once uploaded
+		imageUrl = FLASHBANG_IMAGE_URL,
 		preferredChild = "Primary",
 	},
 	["Molotov"] = {
 		display = "molotov",
-		imageUrl = nil,                 -- set to MOLOTOV_IMAGE_URL once uploaded
+		imageUrl = MOLOTOV_IMAGE_URL,
 		preferredChild = "Primary",
 	},
 	["Grenade"] = {
 		display = "grenade",
-		imageUrl = nil,                 -- set to GRENADE_IMAGE_URL once uploaded
+		imageUrl = GRENADE_IMAGE_URL,
 		preferredChild = "Primary",
 	},
 }
@@ -58,7 +42,6 @@ local activeItems = {}
 local scanTimer = 0
 local SCAN_INTERVAL = 0.25
 
--- Caches (parallel Lua tables, never attach fields to Drawing objects)
 local imageCache = {}    -- url -> raw binary string
 local slotLastUrl = {}   -- slotIndex -> url last set on this slot's Image
 local slotDataSet = {}   -- slotIndex -> true once .Data has been assigned
@@ -103,7 +86,6 @@ local function preloadImages()
 	end
 end
 
--- Assign .Data only when the URL changes for this slot.
 local function ensureSlotData(slotIndex, imgObj, url)
 	local data = getImageData(url)
 	if not data then return false end
@@ -123,8 +105,6 @@ local function hasPosition(obj)
 	return typeof(obj.Position) == "Vector3"
 end
 
--- preferredChild lets each item type point at a specific part
--- (e.g. SatchelEntityHitbox) instead of relying on child order.
 local function resolvePart(instance, preferredChild)
 	if hasPosition(instance) then
 		return instance
@@ -188,31 +168,26 @@ local function drawActiveItems()
 				textObj.Visible = false
 				imgObj.Visible = false
 			else
-				-- Image size (used for both image placement and text offset)
 				local scale = UI.GetValue(PREFIX .. "image_scale")
 				local size = 32 * scale
 
-				-- Decide whether to show the image
 				local showImage = false
 				if UI.GetValue(PREFIX .. "image_enabled") and entry.imageUrl then
 					showImage = ensureSlotData(i, imgObj, entry.imageUrl)
 				end
 
-				-- Place image + determine text Y offset
 				local textYOffset
 				if showImage then
 					imgObj.Size = Vector2.new(size, size)
 					imgObj.Position = screenPos - Vector2.new(size / 2, size + 10)
 					imgObj.Visible = true
 
-					-- Text sits above the image's top edge (image offset + extra gap)
 					textYOffset = -(size + 10) - 20
 				else
 					imgObj.Visible = false
 					textYOffset = -30
 				end
 
-				-- Text
 				if UI.GetValue(PREFIX .. "text_enabled") then
 					textObj.Text = entry.display
 					textObj.Size = math.floor(14 * UI.GetValue(PREFIX .. "text_scale"))
